@@ -4,7 +4,7 @@ services:
     env: node
     plan: free
     region: oregon
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start
     healthCheckPath: /v1/project/health
     envVars:
@@ -29,7 +29,7 @@ services:
     env: node
     plan: starter
     region: oregon
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start
     healthCheckPath: /v1/project/health
     envVars:
@@ -54,7 +54,7 @@ services:
     env: node
     plan: free
     region: oregon
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start:factory-api
     healthCheckPath: /v1/health
     envVars:
@@ -72,7 +72,7 @@ services:
     env: node
     plan: starter
     region: oregon
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start:factory-api
     healthCheckPath: /v1/health
     envVars:
