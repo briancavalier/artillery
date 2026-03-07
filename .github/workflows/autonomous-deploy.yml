@@ -28,7 +28,8 @@ jobs:
     with:
       environment_name: production
       deploy_mode: production-only
-      run_canary: false
+      run_canary: true
+      project_control_base_url: ${{ vars.PROD_PROJECT_CONTROL_BASE_URL || vars.PRODUCTION_PROJECT_CONTROL_BASE_URL }}
       run_learning: true
       deploy_id: run-${{ github.run_id }}-prod
     secrets:
