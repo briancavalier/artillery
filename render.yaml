@@ -92,7 +92,7 @@ databases:
     postgresMajorVersion: 16
 
   - name: dark-factory-production-db
-    plan: starter
+    plan: basic-256mb
     region: oregon
     postgresMajorVersion: 16
 
@@ -102,6 +102,6 @@ databases:
     postgresMajorVersion: 16
 
   - name: artillery-game-production-db
-    plan: starter
+    plan: basic-256mb
     region: oregon
     postgresMajorVersion: 16
