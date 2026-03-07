@@ -1,0 +1,43 @@
+{
+  "specId": "SPEC-0001",
+  "title": "Two-player deterministic turn flow",
+  "source": "human",
+  "owner": "@maintainer",
+  "status": "Draft",
+  "decision": "pending",
+  "intent": "Ship a deterministic two-player artillery turn loop with authoritative command processing and replay-safe state transitions.",
+  "scenarios": [
+    {
+      "id": "SCN-0001",
+      "description": "Player 1 creates a match and Player 2 joins successfully.",
+      "required": true
+    },
+    {
+      "id": "SCN-0002",
+      "description": "Only the current turn owner can fire, and invalid turn attempts are rejected.",
+      "required": true
+    },
+    {
+      "id": "SCN-0003",
+      "description": "Replay with same seed and command sequence yields identical final snapshot hash.",
+      "required": true
+    }
+  ],
+  "verification": [
+    {
+      "scenarioId": "SCN-0001",
+      "checks": ["e2e", "protocol"]
+    },
+    {
+      "scenarioId": "SCN-0002",
+      "checks": ["e2e", "security"]
+    },
+    {
+      "scenarioId": "SCN-0003",
+      "checks": ["unit", "determinism"]
+    }
+  ],
+  "riskNotes": "Risk: command dedup and SSE ordering regressions can desync clients. Mitigation: idempotency tests + stream replay tests in CI.",
+  "createdAt": "2026-03-07T00:00:00.000Z",
+  "updatedAt": "2026-03-07T00:00:00.000Z"
+}

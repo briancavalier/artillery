@@ -1,0 +1,16 @@
+{
+  "name": "@darkfactory/core",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "../../../dist/packages/factory-core/src/index.js",
+  "types": "../../../dist/packages/factory-core/src/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@darkfactory/contracts": "1.0.0"
+  }
+}

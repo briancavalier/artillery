@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://darkfactory.dev/schemas/agent_event.v1.schema.json",
+  "type": "object",
+  "required": ["specversion", "id", "source", "type", "time", "datacontenttype", "data"],
+  "properties": {
+    "specversion": { "const": "1.0" },
+    "id": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "minLength": 1 },
+    "type": { "const": "agent_event" },
+    "time": { "type": "string", "format": "date-time" },
+    "datacontenttype": { "const": "application/json" },
+    "subject": { "type": "string" },
+    "data": {
+      "type": "object",
+      "required": ["specId", "scenarioId", "deployId", "matchId", "action", "actor"],
+      "properties": {
+        "specId": { "type": "string" },
+        "scenarioId": { "type": "string" },
+        "deployId": { "type": "string" },
+        "matchId": { "type": "string" },
+        "action": { "type": "string" },
+        "actor": { "type": "string" },
+        "metadata": { "type": "object" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

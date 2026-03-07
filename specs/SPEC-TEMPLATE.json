@@ -1,0 +1,25 @@
+{
+  "specId": "SPEC-XXXX",
+  "title": "Short feature title",
+  "source": "human",
+  "owner": "@owner",
+  "status": "Draft",
+  "decision": "pending",
+  "intent": "Describe value, constraints, and desired behavior.",
+  "scenarios": [
+    {
+      "id": "SCN-XXXX",
+      "description": "Scenario description",
+      "required": true
+    }
+  ],
+  "verification": [
+    {
+      "scenarioId": "SCN-XXXX",
+      "checks": ["unit"]
+    }
+  ],
+  "riskNotes": "Concrete risk and mitigation.",
+  "createdAt": "2026-03-07T00:00:00.000Z",
+  "updatedAt": "2026-03-07T00:00:00.000Z"
+}

@@ -1,0 +1,44 @@
+{
+  "name": "artillery-dark-factory-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.22.1 <23"
+  },
+  "scripts": {
+    "build": "npm run build:root && npm run build:workspaces",
+    "build:root": "tsc -p tsconfig.json",
+    "build:workspaces": "npm run build --workspaces --if-present",
+    "start": "npm run start -w @artillery/game",
+    "start:factory-api": "npm run start -w @darkfactory/api",
+    "test": "npm run build && node --test dist/tests/**/*.test.js",
+    "spec:lint": "node dist/packages/factory-runner/src/spec-lint.js",
+    "factory:critic": "node dist/packages/factory-runner/src/cli.js critic",
+    "factory:evaluate": "node dist/packages/factory-runner/src/cli.js evaluate",
+    "factory:refine": "node dist/packages/factory-runner/src/cli.js refine",
+    "factory:accept": "node dist/packages/factory-runner/src/cli.js accept",
+    "factory:veto": "node dist/packages/factory-runner/src/cli.js veto",
+    "factory:implement": "node dist/packages/factory-runner/src/cli.js implement",
+    "factory:verify": "node dist/packages/factory-runner/src/cli.js verify",
+    "factory:deploy": "node dist/packages/factory-runner/src/cli.js deploy",
+    "factory:rollback": "node dist/packages/factory-runner/src/cli.js rollback",
+    "factory:auto-rollback": "node dist/packages/factory-runner/src/rollback-deploy.js",
+    "canary": "node dist/packages/factory-runner/src/canary.js",
+    "reports:generate": "node dist/packages/factory-runner/src/reports.js",
+    "feature:proposals": "node dist/packages/factory-runner/src/proposals.js",
+    "policy:input": "node scripts/policy-input.mjs",
+    "policy:check": "node scripts/policy-check.mjs",
+    "contract:check": "node scripts/contract-check.mjs",
+    "contracts:verify": "npm run contract:check && npm run policy:check"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "@types/pg": "^8.15.6",
+    "typescript": "^5.9.3"
+  }
+}

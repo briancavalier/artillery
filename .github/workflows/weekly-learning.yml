@@ -1,0 +1,16 @@
+name: Weekly Learning
+
+on:
+  schedule:
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
+
+jobs:
+  learning:
+    uses: ./.github/workflows/factory-runner-reusable.yml
+    with:
+      environment_name: production
+      deploy_mode: none
+      run_canary: false
+      run_learning: true
+      deploy_id: run-${{ github.run_id }}-weekly

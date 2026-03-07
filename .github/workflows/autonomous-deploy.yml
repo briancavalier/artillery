@@ -1,0 +1,35 @@
+name: Autonomous Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: autonomous-deploy-main
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    uses: ./.github/workflows/factory-runner-reusable.yml
+    with:
+      environment_name: staging
+      deploy_mode: staging-only
+      run_canary: true
+      project_control_base_url: ${{ vars.STAGING_PROJECT_CONTROL_BASE_URL }}
+      run_learning: false
+      deploy_id: run-${{ github.run_id }}-staging
+    secrets:
+      render_staging_deploy_hook: ${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}
+
+  production:
+    needs: staging
+    uses: ./.github/workflows/factory-runner-reusable.yml
+    with:
+      environment_name: production
+      deploy_mode: production-only
+      run_canary: false
+      run_learning: true
+      deploy_id: run-${{ github.run_id }}-prod
+    secrets:
+      render_production_deploy_hook: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}

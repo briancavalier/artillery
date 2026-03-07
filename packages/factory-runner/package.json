@@ -1,0 +1,24 @@
+{
+  "name": "@darkfactory/runner",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "../../../dist/packages/factory-runner/src/index.js",
+  "types": "../../../dist/packages/factory-runner/src/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "spec:lint": "node ../../dist/packages/factory-runner/src/spec-lint.js",
+    "factory": "node ../../dist/packages/factory-runner/src/cli.js",
+    "factory:auto-rollback": "node ../../dist/packages/factory-runner/src/rollback-deploy.js",
+    "reports:generate": "node ../../dist/packages/factory-runner/src/reports.js",
+    "feature:proposals": "node ../../dist/packages/factory-runner/src/proposals.js",
+    "canary": "node ../../dist/packages/factory-runner/src/canary.js"
+  },
+  "dependencies": {
+    "@darkfactory/contracts": "1.0.0",
+    "@darkfactory/core": "1.0.0",
+    "@darkfactory/project-adapter-artillery": "1.0.0"
+  }
+}

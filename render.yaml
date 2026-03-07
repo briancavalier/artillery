@@ -1,0 +1,107 @@
+services:
+  - type: web
+    name: artillery-staging
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /v1/project/health
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: PORT
+        value: 4173
+      - key: LEDGER_PATH
+        value: /tmp/ledger/events.ndjson
+      - key: FACTORY_API_BASE_URL
+        fromService:
+          type: web
+          name: factory-api-staging
+          property: host
+      - key: GAME_DATABASE_URL
+        fromDatabase:
+          name: artillery-game-staging-db
+          property: connectionString
+
+  - type: web
+    name: artillery-production
+    env: node
+    plan: starter
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /v1/project/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4173
+      - key: LEDGER_PATH
+        value: /tmp/ledger/events.ndjson
+      - key: FACTORY_API_BASE_URL
+        fromService:
+          type: web
+          name: factory-api-production
+          property: host
+      - key: GAME_DATABASE_URL
+        fromDatabase:
+          name: artillery-game-production-db
+          property: connectionString
+
+  - type: web
+    name: factory-api-staging
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:factory-api
+    healthCheckPath: /v1/health
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: FACTORY_API_PORT
+        value: 4174
+      - key: FACTORY_DATABASE_URL
+        fromDatabase:
+          name: dark-factory-staging-db
+          property: connectionString
+
+  - type: web
+    name: factory-api-production
+    env: node
+    plan: starter
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:factory-api
+    healthCheckPath: /v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FACTORY_API_PORT
+        value: 4174
+      - key: FACTORY_DATABASE_URL
+        fromDatabase:
+          name: dark-factory-production-db
+          property: connectionString
+
+databases:
+  - name: dark-factory-staging-db
+    plan: free
+    region: oregon
+    postgresMajorVersion: 16
+
+  - name: dark-factory-production-db
+    plan: starter
+    region: oregon
+    postgresMajorVersion: 16
+
+  - name: artillery-game-staging-db
+    plan: free
+    region: oregon
+    postgresMajorVersion: 16
+
+  - name: artillery-game-production-db
+    plan: starter
+    region: oregon
+    postgresMajorVersion: 16

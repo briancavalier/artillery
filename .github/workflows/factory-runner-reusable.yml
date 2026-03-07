@@ -1,0 +1,98 @@
+name: Factory Runner Reusable
+
+on:
+  workflow_call:
+    inputs:
+      environment_name:
+        required: true
+        type: string
+      deploy_mode:
+        required: false
+        type: string
+        default: none
+      run_canary:
+        required: false
+        type: boolean
+        default: false
+      project_control_base_url:
+        required: false
+        type: string
+        default: ""
+      run_learning:
+        required: false
+        type: boolean
+        default: false
+      deploy_id:
+        required: true
+        type: string
+    secrets:
+      render_staging_deploy_hook:
+        required: false
+      render_production_deploy_hook:
+        required: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Tests
+        run: npm test
+      - name: Spec lint
+        run: npm run spec:lint
+      - name: Contract checks
+        run: npm run contract:check
+      - uses: open-policy-agent/setup-opa@v2
+      - name: OPA unit tests
+        run: opa test policy/opa -v
+      - name: OPA boundary enforcement
+        run: |
+          node scripts/policy-input.mjs > policy-input.json
+          opa eval --fail-defined -d policy/opa -i policy-input.json 'data.darkfactory.deny[_]'
+      - name: Verify specs
+        env:
+          DEPLOY_ID: ${{ inputs.deploy_id }}
+        run: npm run factory:verify
+      - name: Deploy via factory runner
+        if: ${{ inputs.deploy_mode != 'none' }}
+        env:
+          DEPLOY_ID: ${{ inputs.deploy_id }}
+          FACTORY_DEPLOY_MODE: ${{ inputs.deploy_mode }}
+          RENDER_STAGING_DEPLOY_HOOK: ${{ secrets.render_staging_deploy_hook }}
+          RENDER_PROD_DEPLOY_HOOK: ${{ secrets.render_production_deploy_hook }}
+        run: npm run factory:deploy
+      - name: Run canary
+        if: ${{ inputs.run_canary }}
+        env:
+          PROJECT_CONTROL_BASE_URL: ${{ inputs.project_control_base_url }}
+        run: npm run canary
+      - name: Assert canary pass
+        if: ${{ inputs.run_canary }}
+        run: node -e "const fs=require('fs');const s=JSON.parse(fs.readFileSync('ops/canary/latest.json','utf8'));if(!s.pass){console.error('Canary failed',s);process.exit(1);}"
+      - name: Auto rollback on canary breach
+        if: ${{ failure() && inputs.run_canary }}
+        env:
+          DEPLOY_ID: ${{ inputs.deploy_id }}
+          REASON: Canary SLO breach in ${{ inputs.environment_name }} for deploy ${{ inputs.deploy_id }}
+          PROJECT_CONTROL_BASE_URL: ${{ inputs.project_control_base_url }}
+        run: npm run factory:auto-rollback
+      - name: Generate reports
+        run: npm run reports:generate
+      - name: Generate feature proposals
+        if: ${{ inputs.run_learning }}
+        run: npm run feature:proposals
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ inputs.environment_name }}-${{ github.run_id }}
+          path: |
+            reports/**
+            ops/canary/latest.json

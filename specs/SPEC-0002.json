@@ -1,0 +1,34 @@
+{
+  "specId": "SPEC-0002",
+  "title": "Feedback-driven feature ideation loop",
+  "source": "agent",
+  "owner": "learning_agent",
+  "status": "Draft",
+  "decision": "pending",
+  "intent": "Collect user feedback and incidents into a local ledger, then generate weekly ranked feature proposals that enter the same spec pipeline as human requests.",
+  "scenarios": [
+    {
+      "id": "SCN-0101",
+      "description": "User feedback is captured in ledger with traceable match/player context.",
+      "required": true
+    },
+    {
+      "id": "SCN-0102",
+      "description": "Weekly feature proposal report is generated and linked to telemetry evidence.",
+      "required": true
+    }
+  ],
+  "verification": [
+    {
+      "scenarioId": "SCN-0101",
+      "checks": ["integration", "observability"]
+    },
+    {
+      "scenarioId": "SCN-0102",
+      "checks": ["batch-job", "reporting"]
+    }
+  ],
+  "riskNotes": "Risk: noisy feedback can generate low-quality proposals. Mitigation: confidence scoring and maintainer acceptance/veto controls.",
+  "createdAt": "2026-03-07T00:00:00.000Z",
+  "updatedAt": "2026-03-07T00:00:00.000Z"
+}

@@ -1,0 +1,14 @@
+{
+  "generatedAt": "2026-03-07T00:00:00.000Z",
+  "pass": true,
+  "thresholds": {
+    "maxRejectRate": 0.1,
+    "maxDisconnects": 5
+  },
+  "metrics": {
+    "accepted": 0,
+    "rejected": 0,
+    "rejectRate": 0,
+    "disconnects": 0
+  }
+}

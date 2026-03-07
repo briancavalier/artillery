@@ -1,0 +1,14 @@
+{
+  "name": "@darkfactory/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node ../../dist/apps/factory-api/src/index.js",
+    "test": "node --test ../../dist/tests/factory-api.test.js"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
+  }
+}

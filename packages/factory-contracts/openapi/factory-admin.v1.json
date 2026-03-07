@@ -1,0 +1,53 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Factory Admin API",
+    "version": "v1"
+  },
+  "paths": {
+    "/v1/admin/factory": {
+      "get": {
+        "summary": "Factory pipeline status",
+        "operationId": "getFactoryStatus",
+        "responses": {
+          "200": {
+            "description": "Factory status"
+          }
+        }
+      }
+    },
+    "/v1/admin/agents": {
+      "get": {
+        "summary": "Agent quality and throughput",
+        "operationId": "getAgentStatus",
+        "responses": {
+          "200": {
+            "description": "Agent status"
+          }
+        }
+      }
+    },
+    "/v1/admin/deployments": {
+      "get": {
+        "summary": "Recent deployments",
+        "operationId": "getDeployments",
+        "responses": {
+          "200": {
+            "description": "Deployment list"
+          }
+        }
+      }
+    },
+    "/v1/events": {
+      "post": {
+        "summary": "Ingest CloudEvents telemetry",
+        "operationId": "ingestEvent",
+        "responses": {
+          "202": {
+            "description": "Event accepted"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Artillery Dark Factory</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="controls">
+        <h1>Artillery Dark Factory</h1>
+        <p>Zero runtime dependencies: Canvas + SSE + Node core HTTP.</p>
+
+        <div class="group">
+          <label>Owner name <input id="ownerName" value="Player 1" /></label>
+          <button id="createMatch">Create Match</button>
+        </div>
+
+        <div class="group">
+          <label>Match id <input id="matchId" /></label>
+          <label>Join as <input id="joinName" value="Player 2" /></label>
+          <button id="joinMatch">Join Match</button>
+        </div>
+
+        <div class="group inline">
+          <label>Angle <input id="angle" type="number" min="1" max="179" value="45" /></label>
+          <button id="setAim">Set Aim</button>
+        </div>
+
+        <div class="group inline">
+          <label>Power <input id="power" type="number" min="1" max="100" value="20" /></label>
+          <button id="setPower">Set Power</button>
+        </div>
+
+        <div class="group inline">
+          <button id="setReady">Ready</button>
+          <button id="fire">Fire</button>
+        </div>
+
+        <div class="group">
+          <label>Feedback <input id="feedback" placeholder="Tell the agents what to improve" /></label>
+          <button id="sendFeedback">Send Feedback</button>
+        </div>
+
+        <p id="status">No active match</p>
+        <ol id="eventLog" class="events"></ol>
+      </section>
+
+      <section class="canvas-wrap">
+        <canvas id="battlefield" width="640" height="360"></canvas>
+      </section>
+    </main>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>

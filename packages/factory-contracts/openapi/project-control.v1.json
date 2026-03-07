@@ -1,0 +1,63 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Project Control API",
+    "version": "v1"
+  },
+  "paths": {
+    "/v1/project/health": {
+      "get": {
+        "summary": "Project health snapshot",
+        "operationId": "getProjectHealth",
+        "responses": {
+          "200": {
+            "description": "Project health response"
+          }
+        }
+      }
+    },
+    "/v1/project/canary": {
+      "post": {
+        "summary": "Run canary gate checks",
+        "operationId": "runCanary",
+        "responses": {
+          "200": {
+            "description": "Canary result"
+          }
+        }
+      }
+    },
+    "/v1/project/scenarios/{scenarioId}/verify": {
+      "post": {
+        "summary": "Verify a scenario by id",
+        "operationId": "verifyScenario",
+        "parameters": [
+          {
+            "name": "scenarioId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scenario verification result"
+          }
+        }
+      }
+    },
+    "/v1/project/rollback": {
+      "post": {
+        "summary": "Trigger rollback handling on project side",
+        "operationId": "triggerRollback",
+        "responses": {
+          "202": {
+            "description": "Rollback accepted"
+          }
+        }
+      }
+    }
+  }
+}

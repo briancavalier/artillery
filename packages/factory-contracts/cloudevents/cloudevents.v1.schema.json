@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://darkfactory.dev/schemas/cloudevents.v1.schema.json",
+  "oneOf": [
+    {
+      "$ref": "./game_event.v1.schema.json"
+    },
+    {
+      "$ref": "./pipeline_event.v1.schema.json"
+    },
+    {
+      "$ref": "./agent_event.v1.schema.json"
+    },
+    {
+      "$ref": "./user_feedback.v1.schema.json"
+    },
+    {
+      "$ref": "./incident.v1.schema.json"
+    }
+  ]
+}

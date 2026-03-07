@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run spec:lint
+      - run: npm run contract:check
+      - uses: open-policy-agent/setup-opa@v2
+      - run: opa test policy/opa -v
+      - run: |
+          node scripts/policy-input.mjs > policy-input.json
+          opa eval --fail-defined -d policy/opa -i policy-input.json 'data.darkfactory.deny[_]'

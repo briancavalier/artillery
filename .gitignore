@@ -1,0 +1,5 @@
+node_modules/
+dist/
+var/ledger/events.ndjson
+var/factory/
+.DS_Store

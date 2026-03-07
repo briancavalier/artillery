@@ -1,0 +1,11 @@
+{
+  "name": "@artillery/game",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-public.mjs",
+    "start": "node ../../dist/apps/artillery-game/src/server/index.js",
+    "test": "node --test ../../dist/tests/determinism.test.js ../../dist/tests/protocol.test.js"
+  }
+}

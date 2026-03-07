@@ -1,0 +1,17 @@
+{
+  "name": "@darkfactory/project-adapter-artillery",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "../../../dist/packages/project-adapter-artillery/src/index.js",
+  "types": "../../../dist/packages/project-adapter-artillery/src/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@darkfactory/contracts": "1.0.0",
+    "@darkfactory/core": "1.0.0"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@darkfactory/contracts",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "../../../dist/packages/factory-contracts/src/index.js",
+  "types": "../../../dist/packages/factory-contracts/src/index.d.ts",
+  "files": [
+    "dist",
+    "openapi",
+    "cloudevents"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}
