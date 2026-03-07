@@ -9,6 +9,8 @@ const maxDisconnects = Number(process.env.CANARY_MAX_DISCONNECTS ?? 5);
 let rejectRate = 0;
 let disconnects = 0;
 let source = "project-health";
+let endpointError = "";
+const explicitControlBaseUrl = process.env.PROJECT_CONTROL_BASE_URL?.trim().length ? true : false;
 
 try {
   const response = await fetch(`${baseUrl}/v1/project/health`);
@@ -28,22 +30,29 @@ try {
   const matchesCreated = Number(payload.metrics?.matchesCreated ?? 0);
   disconnects = Number(payload.metrics?.disconnects ?? 0);
   rejectRate = matchesCreated > 0 ? commandRejections / matchesCreated : 0;
-} catch {
-  source = "ledger-fallback";
-  const ledgerPath = process.env.LEDGER_PATH ?? join(process.cwd(), "var/ledger/events.ndjson");
-  const events = await readLedger(ledgerPath);
-  const gameEvents = events.filter((event) => event.type === "game_event");
-  const accepted = gameEvents.filter((event) => extractData(event).action === "command_accepted").length;
-  const rejected = gameEvents.filter((event) => extractData(event).action === "command_rejected").length;
-  disconnects = gameEvents.filter((event) => extractData(event).action === "player_disconnected").length;
-  rejectRate = accepted + rejected > 0 ? rejected / (accepted + rejected) : 0;
+} catch (error) {
+  endpointError = error instanceof Error ? error.message : String(error);
+  if (explicitControlBaseUrl) {
+    source = "project-health-unavailable";
+  } else {
+    source = "ledger-fallback";
+    const ledgerPath = process.env.LEDGER_PATH ?? join(process.cwd(), "var/ledger/events.ndjson");
+    const events = await readLedger(ledgerPath);
+    const gameEvents = events.filter((event) => event.type === "game_event");
+    const accepted = gameEvents.filter((event) => extractData(event).action === "command_accepted").length;
+    const rejected = gameEvents.filter((event) => extractData(event).action === "command_rejected").length;
+    disconnects = gameEvents.filter((event) => extractData(event).action === "player_disconnected").length;
+    rejectRate = accepted + rejected > 0 ? rejected / (accepted + rejected) : 0;
+  }
 }
 
-const pass = rejectRate <= maxRejectRate && disconnects <= maxDisconnects;
+const endpointAvailable = source !== "project-health-unavailable";
+const pass = endpointAvailable && rejectRate <= maxRejectRate && disconnects <= maxDisconnects;
 const snapshot = {
   generatedAt: new Date().toISOString(),
   pass,
   source,
+  endpointError: endpointError || undefined,
   thresholds: {
     maxRejectRate,
     maxDisconnects
