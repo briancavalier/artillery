@@ -3,6 +3,7 @@ services:
     name: artillery-staging
     env: node
     plan: free
+    autoDeployTrigger: off
     region: oregon
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start
@@ -28,6 +29,7 @@ services:
     name: artillery-production
     env: node
     plan: starter
+    autoDeployTrigger: off
     region: oregon
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start

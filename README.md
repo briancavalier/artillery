@@ -124,6 +124,7 @@ Deploy:
 
 - `RENDER_STAGING_DEPLOY_HOOK`
 - `RENDER_PROD_DEPLOY_HOOK`
+- `FACTORY_COMMIT_SHA` (optional override; defaults to `GITHUB_SHA` in workflows)
 - `PROJECT_CONTROL_BASE_URL`
 
 Factory API:

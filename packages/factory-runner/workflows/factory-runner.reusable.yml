@@ -65,6 +65,7 @@ jobs:
         if: ${{ inputs.deploy_mode != 'none' }}
         env:
           DEPLOY_ID: ${{ inputs.deploy_id }}
+          FACTORY_COMMIT_SHA: ${{ github.sha }}
           FACTORY_DEPLOY_MODE: ${{ inputs.deploy_mode }}
           RENDER_STAGING_DEPLOY_HOOK: ${{ secrets.render_staging_deploy_hook }}
           RENDER_PROD_DEPLOY_HOOK: ${{ secrets.render_production_deploy_hook }}

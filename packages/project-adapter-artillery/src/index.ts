@@ -124,6 +124,7 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
     deploy: async (environment: "staging" | "production", specId: string) => {
       const hook = environment === "staging" ? config.stagingHook : config.productionHook;
       const deployId = `${environment}-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+      const commitRef = resolveDeployCommitRef();
 
       if (config.dryRun || !hook) {
         return {
@@ -132,18 +133,20 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
           deployId,
           metadata: {
             mode: config.dryRun ? "dry-run" : "no-hook",
-            specId
+            specId,
+            commitRef: commitRef ?? ""
           }
         } satisfies DeploymentRecord;
       }
 
-      const response = await fetch(hook, { method: "POST" });
+      const hookUrl = addDeployRef(hook, commitRef);
+      const response = await fetch(hookUrl, { method: "POST" });
       if (!response.ok) {
         return {
           environment,
           status: "failed",
           deployId,
-          metadata: { statusCode: response.status, specId }
+          metadata: { statusCode: response.status, specId, commitRef: commitRef ?? "" }
         } satisfies DeploymentRecord;
       }
 
@@ -153,7 +156,8 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
         deployId,
         metadata: {
           specId,
-          hookResponseStatus: response.status
+          hookResponseStatus: response.status,
+          commitRef: commitRef ?? ""
         }
       } satisfies DeploymentRecord;
     },
@@ -220,4 +224,28 @@ function normalizeBaseUrl(value: string): string {
     return trimmed;
   }
   return `https://${trimmed}`;
+}
+
+function resolveDeployCommitRef(): string | undefined {
+  const value = process.env.FACTORY_COMMIT_SHA ?? process.env.GITHUB_SHA ?? process.env.COMMIT_SHA;
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function addDeployRef(hook: string, commitRef: string | undefined): string {
+  if (!commitRef) {
+    return hook;
+  }
+
+  try {
+    const url = new URL(hook);
+    url.searchParams.set("ref", commitRef);
+    return url.toString();
+  } catch {
+    return hook;
+  }
 }
