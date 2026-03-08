@@ -24,6 +24,8 @@ services:
         fromDatabase:
           name: artillery-game-staging-db
           property: connectionString
+      - key: ARTILLERY_PUBLIC_DIR
+        value: /opt/render/project/src/dist/apps/artillery-game/public
 
   - type: web
     name: artillery-production
@@ -50,6 +52,8 @@ services:
         fromDatabase:
           name: artillery-game-production-db
           property: connectionString
+      - key: ARTILLERY_PUBLIC_DIR
+        value: /opt/render/project/src/dist/apps/artillery-game/public
 
   - type: web
     name: factory-api-staging
