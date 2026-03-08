@@ -3,8 +3,8 @@
   "title": "Two-player deterministic turn flow",
   "source": "human",
   "owner": "@maintainer",
-  "status": "Refined",
-  "decision": "pending",
+  "status": "Approved",
+  "decision": "accept",
   "intent": "Ship a deterministic two-player artillery turn loop with authoritative command processing and replay-safe state transitions, with spec-controller governance validation on PR automation.",
   "scenarios": [
     {
@@ -48,5 +48,5 @@
   ],
   "riskNotes": "Risk: command dedup and SSE ordering regressions can desync clients. Mitigation: idempotency tests + stream replay tests in CI.",
   "createdAt": "2026-03-07T00:00:00.000Z",
-  "updatedAt": "2026-03-08T19:17:25.026Z"
+  "updatedAt": "2026-03-08T19:19:59.463Z"
 }
