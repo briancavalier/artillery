@@ -1,8 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
 import { access } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { MatchStore } from "./match-store.js";
 import {
   appendLedgerEvent,
@@ -19,7 +20,9 @@ export interface ArtilleryServer {
   port: () => number;
 }
 
-export function createArtilleryServer(publicDir = join(process.cwd(), "dist/apps/artillery-game/public")): ArtilleryServer {
+const DEFAULT_PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "public");
+
+export function createArtilleryServer(publicDir = process.env.ARTILLERY_PUBLIC_DIR ?? DEFAULT_PUBLIC_DIR): ArtilleryServer {
   const matchStore = new MatchStore();
   const server = createServer(async (request, response) => {
     try {
