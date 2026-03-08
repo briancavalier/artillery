@@ -92,15 +92,18 @@ export function summarizeProjectHealth(events: NormalizedLedgerEvent[]): Project
 export function summarizeCanary(
   health: ProjectHealthResponse,
   maxRejectRate = Number(process.env.CANARY_MAX_REJECT_RATE ?? 0.1),
-  maxDisconnects = Number(process.env.CANARY_MAX_DISCONNECTS ?? 5)
+  maxDisconnects = Number(process.env.CANARY_MAX_DISCONNECTS ?? 5),
+  minMatches = Number(process.env.CANARY_MIN_MATCHES ?? 5)
 ): ProjectCanaryResponse {
   const rejectRate = health.metrics.matchesCreated > 0
     ? health.metrics.commandRejections / health.metrics.matchesCreated
     : 0;
+  const enoughSamples = health.metrics.matchesCreated >= minMatches;
+  const rejectRatePass = !enoughSamples || rejectRate <= maxRejectRate;
 
   return {
     generatedAt: new Date().toISOString(),
-    pass: rejectRate <= maxRejectRate && health.metrics.disconnects <= maxDisconnects,
+    pass: rejectRatePass && health.metrics.disconnects <= maxDisconnects,
     metrics: {
       rejectRate,
       disconnects: health.metrics.disconnects

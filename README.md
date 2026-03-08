@@ -121,6 +121,7 @@ Common:
 
 - `SPEC_DIR`, `EVIDENCE_DIR`, `LEDGER_PATH`, `CANARY_PATH`
 - `SPEC_ID`, `REASON`, `DRY_RUN`, `DEPLOY_ID`
+- `CANARY_MIN_MATCHES` (default `5`; minimum match sample before reject-rate gate is enforced)
 
 Deploy:
 
@@ -139,6 +140,14 @@ Factory API:
 
 Specs are source artifacts in `specs/SPEC-xxxx.json` for both humans and agents.
 Use `.github/pull_request_template.md` for submission.
+
+GitHub Projects is a good fit for backlog intake and triage ahead of spec creation:
+
+- human requests and agent proposals can share one requirement queue
+- accepted backlog items should graduate into a single-spec PR
+- once a spec PR exists, `specs/SPEC-xxxx.json` remains the source of truth
+
+See [docs/github-projects-requirements.md](/Users/brian/dev/@briancavalier/artillery/docs/github-projects-requirements.md) for the recommended operating model.
 
 ## Spec Controller (PR Automation)
 

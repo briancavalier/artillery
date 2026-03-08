@@ -5,9 +5,11 @@ const baseUrl = normalizeBaseUrl(process.env.PROJECT_CONTROL_BASE_URL ?? "http:/
 const outPath = process.env.CANARY_PATH ?? join(process.cwd(), "ops/canary/latest.json");
 const maxRejectRate = Number(process.env.CANARY_MAX_REJECT_RATE ?? 0.1);
 const maxDisconnects = Number(process.env.CANARY_MAX_DISCONNECTS ?? 5);
+const minMatches = Number(process.env.CANARY_MIN_MATCHES ?? 5);
 
 let rejectRate = 0;
 let disconnects = 0;
+let matchesCreated = 0;
 let source = "project-health";
 let endpointError = "";
 const explicitControlBaseUrl = process.env.PROJECT_CONTROL_BASE_URL?.trim().length ? true : false;
@@ -27,7 +29,7 @@ try {
   };
 
   const commandRejections = Number(payload.metrics?.commandRejections ?? 0);
-  const matchesCreated = Number(payload.metrics?.matchesCreated ?? 0);
+  matchesCreated = Number(payload.metrics?.matchesCreated ?? 0);
   disconnects = Number(payload.metrics?.disconnects ?? 0);
   rejectRate = matchesCreated > 0 ? commandRejections / matchesCreated : 0;
 } catch (error) {
@@ -39,6 +41,7 @@ try {
     const ledgerPath = process.env.LEDGER_PATH ?? join(process.cwd(), "var/ledger/events.ndjson");
     const events = await readLedger(ledgerPath);
     const gameEvents = events.filter((event) => event.type === "game_event");
+    matchesCreated = gameEvents.filter((event) => extractData(event).action === "match_created").length;
     const accepted = gameEvents.filter((event) => extractData(event).action === "command_accepted").length;
     const rejected = gameEvents.filter((event) => extractData(event).action === "command_rejected").length;
     disconnects = gameEvents.filter((event) => extractData(event).action === "player_disconnected").length;
@@ -47,7 +50,9 @@ try {
 }
 
 const endpointAvailable = source !== "project-health-unavailable";
-const pass = endpointAvailable && rejectRate <= maxRejectRate && disconnects <= maxDisconnects;
+const enoughSamples = matchesCreated >= minMatches;
+const rejectRatePass = !enoughSamples || rejectRate <= maxRejectRate;
+const pass = endpointAvailable && rejectRatePass && disconnects <= maxDisconnects;
 const snapshot = {
   generatedAt: new Date().toISOString(),
   pass,
@@ -55,11 +60,14 @@ const snapshot = {
   endpointError: endpointError || undefined,
   thresholds: {
     maxRejectRate,
-    maxDisconnects
+    maxDisconnects,
+    minMatches
   },
   metrics: {
     rejectRate,
-    disconnects
+    disconnects,
+    matchesCreated,
+    sampleEligible: enoughSamples
   }
 };
 
