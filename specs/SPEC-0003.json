@@ -1,0 +1,52 @@
+{
+  "specId": "SPEC-0003",
+  "title": "High-resolution terrain for precision artillery matches",
+  "source": "human",
+  "owner": "@briancavalier",
+  "status": "Draft",
+  "decision": "pending",
+  "intent": "Increase match quality and strategic depth by generating high-resolution terrain silhouettes that look natural, play fairly, and support precise shot outcomes and crater feedback in every multiplayer match.",
+  "scenarios": [
+    {
+      "id": "SCN-0301",
+      "description": "A newly created match always starts with terrain that is visibly varied (ridges, valleys, flat pockets) and both players are placed on stable, playable ground.",
+      "required": true
+    },
+    {
+      "id": "SCN-0302",
+      "description": "Given the same seed and command sequence, terrain shape and all terrain deformation outcomes are identical across replay and verification runs.",
+      "required": true
+    },
+    {
+      "id": "SCN-0303",
+      "description": "Projectile impacts produce smooth, local terrain deformation so players can reliably use crater edges and line-of-sight changes for follow-up shots.",
+      "required": true
+    },
+    {
+      "id": "SCN-0304",
+      "description": "High-resolution terrain does not harm core UX: match start remains fast and turns remain responsive under expected concurrent matches.",
+      "required": true
+    }
+  ],
+  "verification": [
+    {
+      "scenarioId": "SCN-0301",
+      "checks": ["e2e", "playability", "visual-baseline"]
+    },
+    {
+      "scenarioId": "SCN-0302",
+      "checks": ["determinism", "replay"]
+    },
+    {
+      "scenarioId": "SCN-0303",
+      "checks": ["e2e", "physics-regression", "visual-baseline"]
+    },
+    {
+      "scenarioId": "SCN-0304",
+      "checks": ["performance", "canary"]
+    }
+  ],
+  "riskNotes": "Risk: added terrain detail can introduce unfair spawn states or slower turn latency. Mitigation: enforce spawn/playability constraints, deterministic replay checks, and strict performance budgets before promotion.",
+  "createdAt": "2026-03-08T01:23:25.000Z",
+  "updatedAt": "2026-03-08T01:23:25.000Z"
+}
