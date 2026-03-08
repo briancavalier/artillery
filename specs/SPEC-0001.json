@@ -3,7 +3,7 @@
   "title": "Two-player deterministic turn flow",
   "source": "human",
   "owner": "@maintainer",
-  "status": "Draft",
+  "status": "Refined",
   "decision": "pending",
   "intent": "Ship a deterministic two-player artillery turn loop with authoritative command processing and replay-safe state transitions, with spec-controller governance validation on PR automation.",
   "scenarios": [
@@ -26,18 +26,27 @@
   "verification": [
     {
       "scenarioId": "SCN-0001",
-      "checks": ["e2e", "protocol"]
+      "checks": [
+        "e2e",
+        "protocol"
+      ]
     },
     {
       "scenarioId": "SCN-0002",
-      "checks": ["e2e", "security"]
+      "checks": [
+        "e2e",
+        "security"
+      ]
     },
     {
       "scenarioId": "SCN-0003",
-      "checks": ["unit", "determinism"]
+      "checks": [
+        "unit",
+        "determinism"
+      ]
     }
   ],
   "riskNotes": "Risk: command dedup and SSE ordering regressions can desync clients. Mitigation: idempotency tests + stream replay tests in CI.",
   "createdAt": "2026-03-07T00:00:00.000Z",
-  "updatedAt": "2026-03-08T02:05:00.000Z"
+  "updatedAt": "2026-03-08T19:17:25.026Z"
 }
