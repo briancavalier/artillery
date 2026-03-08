@@ -30,7 +30,7 @@ test_deny_spec_controller_missing_permissions if {
     }]
   }
   denies := data.darkfactory.deny with input as test_input
-  denies[_] == "spec-controller workflow missing required analyze job permissions"
+  denies["spec-controller workflow missing required analyze job permissions"]
 }
 
 test_deny_spec_controller_unsafe_checkout if {
@@ -53,5 +53,5 @@ test_deny_spec_controller_unsafe_checkout if {
     }]
   }
   denies := data.darkfactory.deny with input as test_input
-  denies[_] == "spec-controller workflow must not checkout pull request head ref"
+  denies["spec-controller workflow must not checkout pull request head ref"]
 }
