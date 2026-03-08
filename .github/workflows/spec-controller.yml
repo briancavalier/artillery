@@ -1,0 +1,92 @@
+name: Spec Controller
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to process
+        required: true
+        type: string
+
+concurrency:
+  group: spec-controller-pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Analyze PR specs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          FACTORY_API_BASE_URL: ${{ vars.FACTORY_API_BASE_URL || '' }}
+          DEPLOY_ID: pr-${{ github.event.pull_request.number || inputs.pr_number }}-analyze-${{ github.run_id }}
+        run: npm run factory:spec-controller -- analyze
+      - name: Upload analyze manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: spec-controller-analyze-${{ github.run_id }}
+          path: reports/spec-controller/pr-*/manifest.json
+      - name: Upload analyze summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: spec-controller-analyze-summary-${{ github.run_id }}
+          path: reports/spec-controller/pr-*/summary.md
+
+  mutate:
+    needs: analyze
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Apply controller updates/actions
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          FACTORY_API_BASE_URL: ${{ vars.FACTORY_API_BASE_URL || '' }}
+          DEPLOY_ID: pr-${{ github.event.pull_request.number || inputs.pr_number }}-act-${{ github.run_id }}
+        run: npm run factory:spec-controller -- act
+      - name: Upload mutation manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: spec-controller-act-${{ github.run_id }}
+          path: reports/spec-controller/pr-*/manifest.json
+      - name: Upload mutation summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: spec-controller-act-summary-${{ github.run_id }}
+          path: reports/spec-controller/pr-*/summary.md
+      - name: Attest controller manifest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: reports/spec-controller/pr-*/manifest.json

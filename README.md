@@ -80,6 +80,7 @@ npm run factory:verify
 npm run factory:deploy
 npm run factory:rollback -- SPEC-0001 "reason"
 npm run factory:auto-rollback
+npm run factory:spec-controller -- analyze
 npm run canary
 npm run reports:generate
 npm run feature:proposals
@@ -107,6 +108,7 @@ Workflows:
 - `.github/workflows/factory-runner-reusable.yml`: reusable `workflow_call` runner
 - `.github/workflows/autonomous-deploy.yml`: staging then production autonomous deployment
 - `.github/workflows/weekly-learning.yml`: scheduled learning/proposals run
+- `.github/workflows/spec-controller.yml`: PR spec analysis + label-driven governance
 
 Render blueprint:
 
@@ -131,8 +133,27 @@ Factory API:
 
 - `FACTORY_DATABASE_URL` (Postgres)
 - `FACTORY_STATE_PATH` (file fallback)
+- `FACTORY_API_BASE_URL` (optional; CloudEvents ingestion target for spec controller)
 
 ## Human + Agent Spec Intake
 
 Specs are source artifacts in `specs/SPEC-xxxx.json` for both humans and agents.
 Use `.github/pull_request_template.md` for submission.
+
+## Spec Controller (PR Automation)
+
+`spec-controller.yml` runs in pull request context and automatically evaluates changed `specs/SPEC-*.json`.
+
+- Auto analysis: `critic -> evaluate -> refine` semantics with sticky PR summary.
+- Same-repo PRs: controller bot commits status updates back to PR branch.
+- Fork PRs: read-only analysis (no branch mutations).
+
+Maintainer decision labels:
+
+- `factory/accept`
+- `factory/veto`
+- `factory/rollback`
+
+Rationale directive required for `veto` and `rollback`:
+
+`/factory-reason SPEC-xxxx: <reason text>`

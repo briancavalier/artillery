@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "spec:lint": "node ../../dist/packages/factory-runner/src/spec-lint.js",
     "factory": "node ../../dist/packages/factory-runner/src/cli.js",
+    "factory:spec-controller": "node ../../dist/packages/factory-runner/src/spec-controller/cli.js",
     "factory:auto-rollback": "node ../../dist/packages/factory-runner/src/rollback-deploy.js",
     "reports:generate": "node ../../dist/packages/factory-runner/src/reports.js",
     "feature:proposals": "node ../../dist/packages/factory-runner/src/proposals.js",

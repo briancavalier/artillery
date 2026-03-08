@@ -129,18 +129,56 @@ async function collectWorkflowFacts(rootDir) {
     const rel = relativeFromRoot(rootDir, file);
     const raw = await readFile(file, "utf8");
     const triggerPullRequest = /^\s*pull_request:/m.test(raw);
+    const triggerPullRequestTarget = /^\s*pull_request_target:/m.test(raw);
     const usesProdSecret = /RENDER_PROD_DEPLOY_HOOK|DATABASE_URL_PROD|PRODUCTION/i.test(raw);
     const usesEnvironmentProd = /environment:\s*production/i.test(raw);
+    const specController = rel === ".github/workflows/spec-controller.yml"
+      ? collectSpecControllerFacts(raw)
+      : null;
 
     out.push({
       file: rel,
       triggerPullRequest,
+      triggerPullRequestTarget,
+      triggerPullRequestLike: triggerPullRequest || triggerPullRequestTarget,
       usesProdSecret,
-      usesEnvironmentProd
+      usesEnvironmentProd,
+      specController
     });
   }
 
   return out;
+}
+
+function collectSpecControllerFacts(raw) {
+  const analyzeBlock = extractJobBlock(raw, "analyze");
+  const mutateBlock = extractJobBlock(raw, "mutate");
+
+  return {
+    hasAnalyzePermissions:
+      /permissions:\s*[\s\S]*?contents:\s*read[\s\S]*?pull-requests:\s*write/m.test(analyzeBlock),
+    hasMutatePermissions:
+      /permissions:\s*[\s\S]*?contents:\s*write[\s\S]*?pull-requests:\s*write[\s\S]*?issues:\s*read[\s\S]*?id-token:\s*write/m.test(mutateBlock),
+    hasAttestationPermission: /attestations:\s*write/m.test(mutateBlock),
+    usesProdSecret: /RENDER_PROD_DEPLOY_HOOK|PRODUCTION/i.test(raw),
+    usesProductionEnvironment: /environment:\s*production/i.test(raw),
+    checksOutHeadRef: /ref:\s*\${{\s*github\.event\.pull_request\.head\.sha\s*}}/m.test(raw)
+  };
+}
+
+function extractJobBlock(raw, jobName) {
+  const marker = new RegExp(`\\n\\s{2}${jobName}:\\n`, "m");
+  const match = marker.exec(raw);
+  if (!match) {
+    return "";
+  }
+
+  const start = match.index + 1;
+  const next = raw.slice(start).match(/\n\s{2}[A-Za-z0-9_-]+:\n/m);
+  if (!next || next.index === undefined) {
+    return raw.slice(start);
+  }
+  return raw.slice(start, start + next.index + 1);
 }
 
 async function collectContractFacts(rootDir) {

@@ -27,6 +27,7 @@
     "factory:verify": "node dist/packages/factory-runner/src/cli.js verify",
     "factory:deploy": "node dist/packages/factory-runner/src/cli.js deploy",
     "factory:rollback": "node dist/packages/factory-runner/src/cli.js rollback",
+    "factory:spec-controller": "node dist/packages/factory-runner/src/spec-controller/cli.js",
     "factory:auto-rollback": "node dist/packages/factory-runner/src/rollback-deploy.js",
     "canary": "node dist/packages/factory-runner/src/canary.js",
     "reports:generate": "node dist/packages/factory-runner/src/reports.js",

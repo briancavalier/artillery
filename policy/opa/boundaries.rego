@@ -44,16 +44,58 @@ deny[msg] if {
 
 deny[msg] if {
   workflow := input.workflows[_]
-  workflow.triggerPullRequest
+  workflow.triggerPullRequestLike
   workflow.usesProdSecret
-  msg := sprintf("pull_request workflow references prod secret: %s", [workflow.file])
+  msg := sprintf("pull_request context workflow references prod secret: %s", [workflow.file])
 }
 
 deny[msg] if {
   workflow := input.workflows[_]
-  workflow.triggerPullRequest
+  workflow.triggerPullRequestLike
   workflow.usesEnvironmentProd
-  msg := sprintf("pull_request workflow references production environment: %s", [workflow.file])
+  msg := sprintf("pull_request context workflow references production environment: %s", [workflow.file])
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-controller.yml"
+  not workflow.specController.hasAnalyzePermissions
+  msg := "spec-controller workflow missing required analyze job permissions"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-controller.yml"
+  not workflow.specController.hasMutatePermissions
+  msg := "spec-controller workflow missing required mutate job permissions"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-controller.yml"
+  not workflow.specController.hasAttestationPermission
+  msg := "spec-controller workflow missing attestations: write permission"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-controller.yml"
+  workflow.specController.usesProdSecret
+  msg := "spec-controller workflow must not reference production secrets"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-controller.yml"
+  workflow.specController.usesProductionEnvironment
+  msg := "spec-controller workflow must not reference production environment"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-controller.yml"
+  workflow.specController.checksOutHeadRef
+  msg := "spec-controller workflow must not checkout pull request head ref"
 }
 
 deny[msg] if {

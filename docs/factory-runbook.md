@@ -12,13 +12,13 @@
 1. `npm run spec:lint`
 2. `npm run contract:check`
 3. `npm run policy:check`
-4. `npm run factory:critic`
-5. `npm run factory:evaluate`
-6. Review `reports/evaluations/*.json`
-7. Maintainer decision:
-   - `SPEC_ID=SPEC-xxxx npm run factory:accept`
-   - `SPEC_ID=SPEC-xxxx REASON="..." npm run factory:veto`
-8. Continue flow:
+4. Open PR with changed `specs/SPEC-*.json` and let `spec-controller.yml` run auto analysis.
+5. Review sticky `Spec Controller` comment and `reports/spec-controller/pr-<n>/manifest.json` artifact.
+6. Maintainer decision via PR labels:
+   - `factory/accept`
+   - `factory/veto` (requires comment `/factory-reason SPEC-xxxx: ...`)
+   - `factory/rollback` (requires comment `/factory-reason SPEC-xxxx: ...`)
+7. Continue flow:
    - `npm run factory:implement`
    - `npm run factory:verify`
    - `npm run canary`
