@@ -15,6 +15,12 @@ export interface ScenarioEvidence {
   artifact?: string;
 }
 
+export interface EvidenceGenerationOptions {
+  actor?: string;
+  source?: string;
+  deployId?: string;
+}
+
 export interface CanarySnapshot {
   generatedAt: string;
   pass: boolean;
@@ -41,6 +47,7 @@ export interface FactoryAdapter {
   writeEvaluation(report: EvaluationReport): Promise<void>;
   readEvaluation(specId: string): Promise<EvaluationReport | null>;
   readScenarioEvidence(specId: string, scenarioId: string): Promise<ScenarioEvidence | null>;
+  generateScenarioEvidence?(specId: string, options?: EvidenceGenerationOptions): Promise<ScenarioEvidence[]>;
   readCanarySnapshot(): Promise<CanarySnapshot | null>;
   deploy(environment: "staging" | "production", specId: string): Promise<DeploymentRecord>;
   rollback(specId: string, reason: string): Promise<void>;

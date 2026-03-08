@@ -11,11 +11,13 @@ import {
 import type {
   CanarySnapshot,
   DeploymentRecord,
+  EvidenceGenerationOptions,
   EvaluationReport,
   FactoryAdapter,
   ScenarioEvidence,
   SpecRecord
 } from "@darkfactory/core";
+import { generateArtilleryScenarioEvidence } from "./evidence.js";
 
 interface AdapterConfig {
   specDir: string;
@@ -46,7 +48,7 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
     dryRun: process.env.DRY_RUN === "1",
     ...overrides
   };
-  const eventClient = config.localEventMode
+  const eventClient = config.localEventMode || !config.factoryApiBaseUrl
     ? null
     : createFactoryApiClient({ baseUrl: config.factoryApiBaseUrl, requireBaseUrl: true });
 
@@ -128,6 +130,21 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
       } catch {
         return null;
       }
+    },
+
+    generateScenarioEvidence: async (specId: string, options?: EvidenceGenerationOptions) => {
+      const record = await loadSpecById(config.specDir, specId);
+      if (!record) {
+        throw new Error(`Spec not found: ${specId}`);
+      }
+
+      return generateArtilleryScenarioEvidence(record.data, {
+        evidenceDir: config.evidenceDir,
+        ledgerPath: config.ledgerPath,
+        actor: options?.actor,
+        source: options?.source,
+        deployId: options?.deployId
+      });
     },
 
     readCanarySnapshot: async () => {
@@ -241,6 +258,11 @@ async function loadSpecs(specDir: string): Promise<SpecRecord[]> {
   }
 
   return specs;
+}
+
+async function loadSpecById(specDir: string, specId: string): Promise<SpecRecord | null> {
+  const specs = await loadSpecs(specDir);
+  return specs.find((record) => record.data.specId === specId) ?? null;
 }
 
 function normalizeBaseUrl(value: string): string {

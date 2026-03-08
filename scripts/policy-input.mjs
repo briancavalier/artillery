@@ -135,6 +135,9 @@ async function collectWorkflowFacts(rootDir) {
     const specController = rel === ".github/workflows/spec-controller.yml"
       ? collectSpecControllerFacts(raw)
       : null;
+    const specExecution = rel === ".github/workflows/spec-execution.yml"
+      ? collectSpecExecutionFacts(raw)
+      : null;
 
     out.push({
       file: rel,
@@ -143,11 +146,24 @@ async function collectWorkflowFacts(rootDir) {
       triggerPullRequestLike: triggerPullRequest || triggerPullRequestTarget,
       usesProdSecret,
       usesEnvironmentProd,
-      specController
+      specController,
+      specExecution
     });
   }
 
   return out;
+}
+
+function collectSpecExecutionFacts(raw) {
+  const executeBlock = extractJobBlock(raw, "execute");
+
+  return {
+    hasPermissions:
+      /permissions:\s*[\s\S]*?contents:\s*write[\s\S]*?pull-requests:\s*write[\s\S]*?id-token:\s*write/m.test(executeBlock),
+    hasAttestationPermission: /attestations:\s*write/m.test(executeBlock),
+    usesProdSecret: /RENDER_PROD_DEPLOY_HOOK|DATABASE_URL_PROD/i.test(raw),
+    usesProductionEnvironment: /environment:\s*production/i.test(raw)
+  };
 }
 
 function collectSpecControllerFacts(raw) {

@@ -81,6 +81,7 @@ npm run factory:deploy
 npm run factory:rollback -- SPEC-0001 "reason"
 npm run factory:auto-rollback
 npm run factory:spec-controller -- analyze
+npm run factory:spec-execution -- act
 npm run canary
 npm run reports:generate
 npm run feature:proposals
@@ -109,6 +110,7 @@ Workflows:
 - `.github/workflows/autonomous-deploy.yml`: staging then production autonomous deployment
 - `.github/workflows/weekly-learning.yml`: scheduled learning/proposals run
 - `.github/workflows/spec-controller.yml`: PR spec analysis + label-driven governance
+- `.github/workflows/spec-execution.yml`: `main` branch implementation queue + evidence-driven advancement
 
 Render blueprint:
 
@@ -167,3 +169,20 @@ Maintainer decision labels:
 Rationale directive required for `veto` and `rollback`:
 
 `/factory-reason SPEC-xxxx: <reason text>`
+
+## Spec Execution (Post-Merge Automation)
+
+`spec-execution.yml` runs on trusted `main` pushes and handles the gap after a spec is approved and merged.
+
+- Queues accepted `Approved` specs into draft implementation PRs on `codex/implement-<spec-id>`.
+- Seeds implementation branches with:
+  - `ops/spec-execution/SPEC-xxxx.json`
+  - `evidence/SPEC-xxxx/README.md`
+- Auto-advances accepted specs through `Implemented -> Verified` when the project adapter can generate required scenario evidence.
+- Leaves unsupported scenarios in place with explicit failed evidence files instead of promoting them.
+
+For artillery today, adapter-managed evidence generation is implemented for:
+
+- `SCN-0001`
+- `SCN-0002`
+- `SCN-0003`

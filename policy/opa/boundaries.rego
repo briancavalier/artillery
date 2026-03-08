@@ -99,6 +99,34 @@ deny[msg] if {
 }
 
 deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-execution.yml"
+  not workflow.specExecution.hasPermissions
+  msg := "spec-execution workflow missing required permissions"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-execution.yml"
+  not workflow.specExecution.hasAttestationPermission
+  msg := "spec-execution workflow missing attestations: write permission"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-execution.yml"
+  workflow.specExecution.usesProdSecret
+  msg := "spec-execution workflow must not reference production secrets"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-execution.yml"
+  workflow.specExecution.usesProductionEnvironment
+  msg := "spec-execution workflow must not reference production environment"
+}
+
+deny[msg] if {
   issue := input.contracts.issues[_]
   msg := sprintf("contract issue: %s", [issue])
 }

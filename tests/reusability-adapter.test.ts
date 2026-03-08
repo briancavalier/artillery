@@ -24,6 +24,9 @@ class InMemoryAdapter implements FactoryAdapter {
   async readScenarioEvidence(specId: string, scenarioId: string): Promise<ScenarioEvidence | null> {
     return this.evidence.get(`${specId}:${scenarioId}`) ?? null;
   }
+  async generateScenarioEvidence(): Promise<ScenarioEvidence[]> {
+    return [...this.evidence.values()];
+  }
   async readCanarySnapshot(): Promise<CanarySnapshot | null> { return { generatedAt: new Date().toISOString(), pass: true, metrics: {} }; }
   async deploy(environment: "staging" | "production", specId: string): Promise<DeploymentRecord> {
     return { environment, status: "ok", deployId: `${environment}-deploy`, metadata: { specId } };

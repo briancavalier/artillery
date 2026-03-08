@@ -1,0 +1,60 @@
+name: Spec Execution
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: spec-execution-main
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Policy checks
+        run: npm run policy:check
+      - name: Run spec execution controller
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          DEPLOY_ID: run-${{ github.run_id }}-spec-execution
+          FACTORY_API_BASE_URL: ${{ vars.PROD_FACTORY_API_BASE_URL || vars.PRODUCTION_FACTORY_API_BASE_URL || vars.STAGING_FACTORY_API_BASE_URL }}
+        run: npm run factory:spec-execution -- act
+      - name: Commit spec/evidence updates
+        run: |
+          if git diff --quiet -- specs evidence reports/spec-execution; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add specs evidence reports/spec-execution
+          git commit -m "chore(factory): advance approved specs"
+          git push
+      - name: Upload execution manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: spec-execution-${{ github.run_id }}
+          path: reports/spec-execution/latest.json
+      - name: Attest execution manifest
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: reports/spec-execution/latest.json

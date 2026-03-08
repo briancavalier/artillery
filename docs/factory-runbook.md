@@ -18,11 +18,10 @@
    - `factory/accept`
    - `factory/veto` (requires comment `/factory-reason SPEC-xxxx: ...`)
    - `factory/rollback` (requires comment `/factory-reason SPEC-xxxx: ...`)
-7. Continue flow:
-   - `npm run factory:implement`
-   - `npm run factory:verify`
-   - `npm run canary`
-   - `npm run factory:deploy`
+7. Merge accepted spec PRs to `main`.
+8. `spec-execution.yml` queues implementation PRs automatically for accepted `Approved` specs.
+9. `spec-execution.yml` also runs adapter-backed evidence generation and advances supported specs through `Implemented` and `Verified`.
+10. `autonomous-deploy.yml` promotes verified specs through staging and production.
 
 Centralized events:
 
@@ -31,6 +30,9 @@ Centralized events:
 
 ## Cloud Autonomous Flow
 
+- Accepted specs merged to `main` trigger `spec-execution.yml`.
+- Spec execution opens or reuses draft implementation PRs for pending code work.
+- Spec execution writes evidence files and bot-commits status transitions when verification passes.
 - Push to `main` triggers staging deployment via reusable workflow.
 - Canary gate must pass in staging before production promotion.
 - Canary breach triggers `npm run factory:auto-rollback` before workflow exit.
