@@ -7,15 +7,14 @@ import { fileURLToPath } from "node:url";
 import { MatchStore } from "./match-store.js";
 import {
   appendLedgerEvent,
-  readLedger,
-  summarizeCanary,
-  summarizeProjectHealth,
-  verifyScenario
+  getProjectCanary,
+  getProjectHealth,
+  verifyProjectScenario
 } from "./ledger.js";
 import type { ClientCommand, CommandEnvelope } from "../shared/types.js";
 
 export interface ArtilleryServer {
-  listen: (port: number) => Promise<void>;
+  listen: (port: number, host?: string) => Promise<void>;
   close: () => Promise<void>;
   port: () => number;
 }
@@ -34,8 +33,8 @@ export function createArtilleryServer(publicDir = process.env.ARTILLERY_PUBLIC_D
   });
 
   return {
-    listen: async (port: number) => {
-      await new Promise<void>((resolve) => server.listen(port, resolve));
+    listen: async (port: number, host = "127.0.0.1") => {
+      await new Promise<void>((resolve) => server.listen(port, host, resolve));
     },
     close: async () => {
       await new Promise<void>((resolve, reject) => {
@@ -83,29 +82,24 @@ async function routeRequest(
   }
 
   if (method === "GET" && url.pathname === "/v1/health") {
-    const events = await readLedger();
-    await writeJson(response, 200, summarizeProjectHealth(events));
+    await writeJson(response, 200, await getProjectHealth());
     return;
   }
 
   if (method === "GET" && url.pathname === "/v1/project/health") {
-    const events = await readLedger();
-    await writeJson(response, 200, summarizeProjectHealth(events));
+    await writeJson(response, 200, await getProjectHealth());
     return;
   }
 
   if (method === "POST" && url.pathname === "/v1/project/canary") {
-    const events = await readLedger();
-    const health = summarizeProjectHealth(events);
-    await writeJson(response, 200, summarizeCanary(health));
+    await writeJson(response, 200, await getProjectCanary());
     return;
   }
 
   const verifyMatch = url.pathname.match(/^\/v1\/project\/scenarios\/([^/]+)\/verify$/);
   if (method === "POST" && verifyMatch) {
     const [, scenarioId] = verifyMatch;
-    const events = await readLedger();
-    await writeJson(response, 200, verifyScenario(events, scenarioId));
+    await writeJson(response, 200, await verifyProjectScenario(scenarioId));
     return;
   }
 

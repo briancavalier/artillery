@@ -8,7 +8,12 @@ if (!deployId) {
   process.exitCode = 1;
 } else {
   const reason = process.env.REASON?.trim() || `Canary breach for deploy ${deployId}`;
-  const events = await readCloudEvents();
+  const events = await readCloudEvents(undefined, {
+    type: "pipeline_event",
+    deployId,
+    limit: 5000,
+    order: "desc"
+  });
   const specIds = deployedSpecsFor(events, deployId);
 
   if (specIds.length === 0) {

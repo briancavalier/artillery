@@ -40,22 +40,22 @@ test("human and agent specs follow same critique/evaluation/refinement flow", as
 
   await runScript(SPEC_LINT_SCRIPT, [], {
     cwd: workspace,
-    env: { SPEC_DIR: join(workspace, "specs") }
+    env: { SPEC_DIR: join(workspace, "specs"), FACTORY_EVENT_MODE: "local" }
   });
 
   await runScript(FACTORY_SCRIPT, ["critic"], {
     cwd: workspace,
-    env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: join(workspace, "var/ledger/events.ndjson") }
+    env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: join(workspace, "var/ledger/events.ndjson"), FACTORY_EVENT_MODE: "local" }
   });
 
   await runScript(FACTORY_SCRIPT, ["evaluate"], {
     cwd: workspace,
-    env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: join(workspace, "var/ledger/events.ndjson") }
+    env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: join(workspace, "var/ledger/events.ndjson"), FACTORY_EVENT_MODE: "local" }
   });
 
   await runScript(FACTORY_SCRIPT, ["refine"], {
     cwd: workspace,
-    env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: join(workspace, "var/ledger/events.ndjson") }
+    env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: join(workspace, "var/ledger/events.ndjson"), FACTORY_EVENT_MODE: "local" }
   });
 
   const human = await readJson<{ status: string }>(specHumanPath);
@@ -71,19 +71,19 @@ test("maintainer controls enforce accept, veto, verify, deploy, rollback", async
 
   await writeJson(specPath, makeSpec("SPEC-H-002", "human"));
 
-  await runScript(FACTORY_SCRIPT, ["critic"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, SPEC_ID: "SPEC-H-002" } });
-  await runScript(FACTORY_SCRIPT, ["evaluate"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, SPEC_ID: "SPEC-H-002" } });
-  await runScript(FACTORY_SCRIPT, ["refine"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, SPEC_ID: "SPEC-H-002" } });
-  await runScript(FACTORY_SCRIPT, ["accept", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath } });
-  await runScript(FACTORY_SCRIPT, ["implement", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath } });
+  await runScript(FACTORY_SCRIPT, ["critic"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, SPEC_ID: "SPEC-H-002", FACTORY_EVENT_MODE: "local" } });
+  await runScript(FACTORY_SCRIPT, ["evaluate"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, SPEC_ID: "SPEC-H-002", FACTORY_EVENT_MODE: "local" } });
+  await runScript(FACTORY_SCRIPT, ["refine"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, SPEC_ID: "SPEC-H-002", FACTORY_EVENT_MODE: "local" } });
+  await runScript(FACTORY_SCRIPT, ["accept", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, FACTORY_EVENT_MODE: "local" } });
+  await runScript(FACTORY_SCRIPT, ["implement", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, FACTORY_EVENT_MODE: "local" } });
 
   await mkdir(join(workspace, "evidence/SPEC-H-002"), { recursive: true });
   await writeJson(join(workspace, "evidence/SPEC-H-002/SCN-1.json"), { scenarioId: "SCN-1", passed: true });
   await writeJson(join(workspace, "evidence/SPEC-H-002/SCN-2.json"), { scenarioId: "SCN-2", passed: true });
   await writeJson(join(workspace, "ops/canary/latest.json"), { pass: true, metrics: { rejectRate: 0 } });
 
-  await runScript(FACTORY_SCRIPT, ["verify", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath } });
-  await runScript(FACTORY_SCRIPT, ["deploy", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath } });
+  await runScript(FACTORY_SCRIPT, ["verify", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, FACTORY_EVENT_MODE: "local" } });
+  await runScript(FACTORY_SCRIPT, ["deploy", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, FACTORY_EVENT_MODE: "local" } });
 
   let spec = await readJson<{ status: string; decision: string }>(specPath);
   assert.equal(spec.status, "Deployed");
@@ -91,7 +91,7 @@ test("maintainer controls enforce accept, veto, verify, deploy, rollback", async
 
   await runScript(FACTORY_SCRIPT, ["rollback", "SPEC-H-002", "manual rollback for regression"], {
     cwd: workspace,
-    env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath }
+    env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, FACTORY_EVENT_MODE: "local" }
   });
 
   spec = await readJson(specPath);

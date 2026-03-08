@@ -12,7 +12,7 @@
 1. `npm run spec:lint`
 2. `npm run contract:check`
 3. `npm run policy:check`
-4. Open PR with changed `specs/SPEC-*.json` and let `spec-controller.yml` run auto analysis.
+4. Triage new requirements in GitHub Projects, then open a PR with exactly one changed `specs/SPEC-*.json`.
 5. Review sticky `Spec Controller` comment and `reports/spec-controller/pr-<n>/manifest.json` artifact.
 6. Maintainer decision via PR labels:
    - `factory/accept`
@@ -23,6 +23,11 @@
    - `npm run factory:verify`
    - `npm run canary`
    - `npm run factory:deploy`
+
+Centralized events:
+
+- Set `FACTORY_API_BASE_URL` for staging/production runner jobs and project-control proxies.
+- Use `FACTORY_EVENT_MODE=local` only for explicit local/test runs.
 
 ## Cloud Autonomous Flow
 
@@ -39,10 +44,13 @@
    - `curl -X POST "$PROJECT_CONTROL_BASE_URL/v1/project/rollback" -H 'content-type: application/json' -d '{"specId":"SPEC-xxxx","reason":"incident summary"}'`
 4. Regenerate reports:
    - `npm run reports:generate`
+5. Optional NDJSON backfill into the centralized sink:
+   - `FACTORY_API_BASE_URL=https://factory-api.example.com npm run factory:backfill-events -- /path/to/events.ndjson`
 
 ## Weekly Learning Loop
 
 1. Generate health reports: `npm run reports:generate`
 2. Generate feature proposals: `npm run feature:proposals`
-3. Convert accepted proposals into new specs.
-4. Process through the same spec->deploy pipeline.
+3. Publish or sync proposals into the GitHub Project backlog for triage and deduplication.
+4. Convert selected backlog items into new specs.
+5. Process through the same spec->deploy pipeline.

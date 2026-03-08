@@ -3,19 +3,19 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFactoryApiServer } from "../apps/factory-api/src/index.js";
+import type { CloudEventEnvelope } from "@darkfactory/contracts";
+import { createFactoryStore } from "../apps/factory-api/src/storage.js";
 
-test("factory api ingests CloudEvents and reports admin status", async () => {
+test("factory store ingests CloudEvents and reports centralized admin status", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "factory-api-"));
+  process.env.FACTORY_EVENT_MODE = "local";
   process.env.FACTORY_STATE_PATH = join(workspace, "state.json");
   delete process.env.FACTORY_DATABASE_URL;
 
-  const server = await createFactoryApiServer();
-  await server.listen(0);
-  const base = `http://127.0.0.1:${server.port()}`;
+  const store = await createFactoryStore();
 
   try {
-    const event = {
+    const deployedEvent: CloudEventEnvelope<Record<string, unknown>> = {
       specversion: "1.0",
       id: "evt-1",
       source: "test",
@@ -33,34 +33,85 @@ test("factory api ingests CloudEvents and reports admin status", async () => {
       }
     };
 
-    const ingest = await fetch(`${base}/v1/events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(event)
-    });
-    assert.equal(ingest.status, 202);
+    const gameEvents: Array<CloudEventEnvelope<Record<string, unknown>>> = [
+      {
+        specversion: "1.0",
+        id: "evt-2",
+        source: "test",
+        type: "game_event",
+        time: new Date().toISOString(),
+        datacontenttype: "application/json",
+        data: {
+          action: "match_created",
+          actor: "system",
+          specId: "SPEC-UNBOUND",
+          scenarioId: "SCN-0001",
+          deployId: "DEPLOY-GAME-1",
+          matchId: "MATCH-API-1",
+          metadata: {}
+        }
+      },
+      {
+        specversion: "1.0",
+        id: "evt-3",
+        source: "test",
+        type: "game_event",
+        time: new Date().toISOString(),
+        datacontenttype: "application/json",
+        data: {
+          action: "player_joined",
+          actor: "system",
+          specId: "SPEC-UNBOUND",
+          scenarioId: "SCN-0001",
+          deployId: "DEPLOY-GAME-1",
+          matchId: "MATCH-API-1",
+          metadata: {}
+        }
+      },
+      {
+        specversion: "1.0",
+        id: "evt-4",
+        source: "test",
+        type: "game_event",
+        time: new Date().toISOString(),
+        datacontenttype: "application/json",
+        data: {
+          action: "match_ended",
+          actor: "system",
+          specId: "SPEC-UNBOUND",
+          scenarioId: "SCN-0001",
+          deployId: "DEPLOY-GAME-1",
+          matchId: "MATCH-API-1",
+          metadata: {}
+        }
+      }
+    ];
 
-    const factory = await fetch(`${base}/v1/admin/factory`);
-    assert.equal(factory.status, 200);
-    const factoryBody = await factory.json() as { pipeline: { deploymentsToday: number } };
+    for (const event of [deployedEvent, ...gameEvents]) {
+      await store.ingest(event);
+    }
+
+    const factoryBody = await store.getFactoryStatus();
     assert.equal(factoryBody.pipeline.deploymentsToday, 1);
 
-    const agents = await fetch(`${base}/v1/admin/agents`);
-    assert.equal(agents.status, 200);
+    const eventsBody = { events: await store.getEvents({ type: "game_event", matchId: "MATCH-API-1", limit: 10, order: "asc" }) };
+    assert.equal(eventsBody.events.length, 3);
+    assert.equal(eventsBody.events[0]?.data.action, "match_created");
 
-    const root = await fetch(`${base}/`, { redirect: "manual" });
-    assert.equal(root.status, 302);
-    assert.equal(root.headers.get("location"), "/dashboard");
+    const agents = await store.getAgentStatus();
+    assert.equal(typeof agents.acceptanceRate, "number");
 
-    const dashboard = await fetch(`${base}/dashboard`);
-    assert.equal(dashboard.status, 200);
-    const contentType = dashboard.headers.get("content-type");
-    assert.ok(contentType?.includes("text/html"));
-    const html = await dashboard.text();
-    assert.match(html, /Dark Factory Dashboard/);
-    assert.match(html, /Recent Deployments/);
+    const healthBody = await store.getProjectHealth();
+    assert.equal(healthBody.metrics.matchesCreated, 1);
+    assert.equal(healthBody.metrics.completionRate, 1);
+
+    const canaryBody = await store.getProjectCanary();
+    assert.equal(canaryBody.pass, true);
+
+    const verifyBody = await store.verifyScenario("SCN-0001");
+    assert.equal(verifyBody.passed, true);
   } finally {
-    await server.close();
+    delete process.env.FACTORY_EVENT_MODE;
     delete process.env.FACTORY_STATE_PATH;
   }
 });

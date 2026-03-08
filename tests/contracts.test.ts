@@ -21,7 +21,16 @@ test("project-control and factory-admin OpenAPI contracts expose required endpoi
     assert.ok(projectControl.paths[path], `missing project-control path ${path}`);
   }
 
-  for (const path of ["/v1/admin/factory", "/v1/admin/agents", "/v1/events"]) {
+  for (const path of [
+    "/v1/admin/factory",
+    "/v1/admin/events",
+    "/v1/admin/agents",
+    "/v1/admin/deployments",
+    "/v1/admin/project-health",
+    "/v1/admin/project/canary",
+    "/v1/admin/project/scenarios/{scenarioId}/verify",
+    "/v1/events"
+  ]) {
     assert.ok(factoryAdmin.paths[path], `missing factory-admin path ${path}`);
   }
 });

@@ -13,8 +13,6 @@ services:
         value: staging
       - key: PORT
         value: 4173
-      - key: LEDGER_PATH
-        value: /tmp/ledger/events.ndjson
       - key: FACTORY_API_BASE_URL
         fromService:
           type: web
@@ -41,8 +39,6 @@ services:
         value: production
       - key: PORT
         value: 4173
-      - key: LEDGER_PATH
-        value: /tmp/ledger/events.ndjson
       - key: FACTORY_API_BASE_URL
         fromService:
           type: web

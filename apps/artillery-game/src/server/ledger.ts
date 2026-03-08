@@ -1,7 +1,18 @@
 import { mkdir, readFile, appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { CloudEventEnvelope, ProjectHealthResponse, ProjectCanaryResponse } from "@darkfactory/contracts";
+import {
+  createFactoryApiClient,
+  isFactoryEventLocalMode,
+  normalizeCloudEvent,
+  summarizeCanary as summarizeProjectCanaryFromHealth,
+  summarizeProjectHealth as summarizeProjectHealthFromEvents,
+  verifyScenario as verifyScenarioFromEvents,
+  type CloudEventEnvelope,
+  type ProjectHealthResponse,
+  type ProjectCanaryResponse,
+  type ScenarioVerificationResponse
+} from "@darkfactory/contracts";
 
 export interface LedgerEventInput {
   type: "game_event" | "pipeline_event" | "agent_event" | "user_feedback" | "incident";
@@ -38,18 +49,13 @@ export async function appendLedgerEvent(input: LedgerEventInput, path = defaultL
   const normalized = normalizeInput(input);
   const cloudEvent = toCloudEvent(normalized, input.source ?? "artillery.game");
 
-  await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, `${JSON.stringify(cloudEvent)}\n`, "utf8");
-
-  const factoryApiBaseUrl = process.env.FACTORY_API_BASE_URL;
-  if (factoryApiBaseUrl) {
-    const endpoint = `${normalizeBaseUrl(factoryApiBaseUrl)}/v1/events`;
-    void fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(cloudEvent)
-    }).catch(() => {
-      // Telemetry fan-out should not block gameplay.
+  if (isFactoryEventLocalMode()) {
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(path, `${JSON.stringify(cloudEvent)}\n`, "utf8");
+  } else {
+    const client = createFactoryApiClient({ requireBaseUrl: false });
+    void client.ingestEvent(cloudEvent, { failOpen: true }).catch(() => {
+      // Telemetry must not block gameplay.
     });
   }
 
@@ -57,6 +63,12 @@ export async function appendLedgerEvent(input: LedgerEventInput, path = defaultL
 }
 
 export async function readLedger(path = defaultLedgerPath()): Promise<NormalizedLedgerEvent[]> {
+  if (!isFactoryEventLocalMode()) {
+    const client = createFactoryApiClient({ requireBaseUrl: true });
+    const events = await client.listEvents({ type: "game_event", limit: 5000, order: "asc" });
+    return events.map(fromCloudEvent);
+  }
+
   try {
     const raw = await readFile(path, "utf8");
     return raw
@@ -68,6 +80,33 @@ export async function readLedger(path = defaultLedgerPath()): Promise<Normalized
   } catch {
     return [];
   }
+}
+
+export async function getProjectHealth(): Promise<ProjectHealthResponse> {
+  if (!isFactoryEventLocalMode()) {
+    const client = createFactoryApiClient({ requireBaseUrl: true });
+    return client.getProjectHealth();
+  }
+
+  return summarizeProjectHealthFromEvents(await readCloudEvents());
+}
+
+export async function getProjectCanary(): Promise<ProjectCanaryResponse> {
+  if (!isFactoryEventLocalMode()) {
+    const client = createFactoryApiClient({ requireBaseUrl: true });
+    return client.getProjectCanary();
+  }
+
+  return summarizeProjectCanaryFromHealth(await getProjectHealth());
+}
+
+export async function verifyProjectScenario(scenarioId: string): Promise<ScenarioVerificationResponse> {
+  if (!isFactoryEventLocalMode()) {
+    const client = createFactoryApiClient({ requireBaseUrl: true });
+    return client.verifyScenario(scenarioId);
+  }
+
+  return verifyScenarioFromEvents(await readCloudEvents(), scenarioId);
 }
 
 export function summarizeProjectHealth(events: NormalizedLedgerEvent[]): ProjectHealthResponse {
@@ -242,4 +281,33 @@ function normalizeBaseUrl(value: string): string {
 
 function count(events: NormalizedLedgerEvent[], type: NormalizedLedgerEvent["type"], action: string): number {
   return events.filter((event) => event.type === type && event.action === action).length;
+}
+
+async function readCloudEvents(path = defaultLedgerPath()): Promise<Array<CloudEventEnvelope<Record<string, unknown>>>> {
+  try {
+    const raw = await readFile(path, "utf8");
+    return raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as CloudEventEnvelope<Record<string, unknown>>);
+  } catch {
+    return [];
+  }
+}
+
+function fromCloudEvent(event: CloudEventEnvelope<Record<string, unknown>>): NormalizedLedgerEvent {
+  const normalized = normalizeCloudEvent(event);
+  return {
+    id: normalized.id,
+    at: normalized.at,
+    type: normalized.type,
+    action: normalized.action,
+    actor: normalized.actor,
+    specId: normalized.specId,
+    scenarioId: normalized.scenarioId,
+    deployId: normalized.deployId,
+    matchId: normalized.matchId,
+    metadata: normalized.metadata
+  };
 }

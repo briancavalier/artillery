@@ -119,9 +119,10 @@ Render blueprint:
 
 Common:
 
-- `SPEC_DIR`, `EVIDENCE_DIR`, `LEDGER_PATH`, `CANARY_PATH`
+- `SPEC_DIR`, `EVIDENCE_DIR`, `CANARY_PATH`
 - `SPEC_ID`, `REASON`, `DRY_RUN`, `DEPLOY_ID`
 - `CANARY_MIN_MATCHES` (default `5`; minimum match sample before reject-rate gate is enforced)
+- `FACTORY_EVENT_MODE=local` for explicit local/test event storage
 
 Deploy:
 
@@ -133,8 +134,8 @@ Deploy:
 Factory API:
 
 - `FACTORY_DATABASE_URL` (Postgres)
-- `FACTORY_STATE_PATH` (file fallback)
-- `FACTORY_API_BASE_URL` (optional; CloudEvents ingestion target for spec controller)
+- `FACTORY_API_BASE_URL` (required for centralized event readers/writers outside local mode)
+- `FACTORY_STATE_PATH` (local-mode file fallback only)
 
 ## Human + Agent Spec Intake
 

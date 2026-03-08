@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CloudEventEnvelope } from "@darkfactory/contracts";
+import { createFactoryApiClient, type CloudEventEnvelope } from "@darkfactory/contracts";
 
 interface EmitOptions {
   baseUrl?: string;
@@ -36,11 +36,8 @@ export async function emitControllerEvent(options: EmitOptions): Promise<void> {
   };
 
   try {
-    await fetch(`${baseUrl}/v1/events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(envelope)
-    });
+    const client = createFactoryApiClient({ baseUrl, requireBaseUrl: true });
+    await client.ingestEvent(envelope);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[spec-controller] failed to emit event: ${message}`);

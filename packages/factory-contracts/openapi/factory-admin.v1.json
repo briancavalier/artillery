@@ -16,6 +16,17 @@
         }
       }
     },
+    "/v1/admin/events": {
+      "get": {
+        "summary": "Query raw CloudEvents telemetry",
+        "operationId": "getEvents",
+        "responses": {
+          "200": {
+            "description": "Event list"
+          }
+        }
+      }
+    },
     "/v1/admin/agents": {
       "get": {
         "summary": "Agent quality and throughput",
@@ -34,6 +45,39 @@
         "responses": {
           "200": {
             "description": "Deployment list"
+          }
+        }
+      }
+    },
+    "/v1/admin/project-health": {
+      "get": {
+        "summary": "Derived project health from centralized events",
+        "operationId": "getProjectHealth",
+        "responses": {
+          "200": {
+            "description": "Project health"
+          }
+        }
+      }
+    },
+    "/v1/admin/project/canary": {
+      "post": {
+        "summary": "Evaluate project canary from centralized events",
+        "operationId": "runProjectCanary",
+        "responses": {
+          "200": {
+            "description": "Canary result"
+          }
+        }
+      }
+    },
+    "/v1/admin/project/scenarios/{scenarioId}/verify": {
+      "post": {
+        "summary": "Verify a scenario from centralized events",
+        "operationId": "verifyScenario",
+        "responses": {
+          "200": {
+            "description": "Scenario verification result"
           }
         }
       }

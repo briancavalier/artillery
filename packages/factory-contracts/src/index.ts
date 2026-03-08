@@ -89,6 +89,21 @@ export interface ScenarioVerificationResponse {
   details: Record<string, unknown>;
 }
 
+export interface FactoryEventsQuery {
+  type?: LedgerEventType;
+  action?: string;
+  specId?: string;
+  deployId?: string;
+  matchId?: string;
+  limit?: number;
+  after?: string;
+  order?: "asc" | "desc";
+}
+
+export interface FactoryEventsResponse {
+  events: Array<CloudEventEnvelope<Record<string, unknown>>>;
+}
+
 export interface FactoryAdminStatus {
   generatedAt: string;
   status: "ok" | "degraded";
@@ -109,3 +124,6 @@ export interface AgentQualityStatus {
 }
 
 export const FACTORY_CONTRACT_VERSION = "v1";
+
+export * from "./event-analysis.js";
+export * from "./factory-api-client.js";

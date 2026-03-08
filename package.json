@@ -29,6 +29,7 @@
     "factory:rollback": "node dist/packages/factory-runner/src/cli.js rollback",
     "factory:spec-controller": "node dist/packages/factory-runner/src/spec-controller/cli.js",
     "factory:auto-rollback": "node dist/packages/factory-runner/src/rollback-deploy.js",
+    "factory:backfill-events": "node dist/packages/factory-runner/src/backfill-events.js",
     "canary": "node dist/packages/factory-runner/src/canary.js",
     "reports:generate": "node dist/packages/factory-runner/src/reports.js",
     "feature:proposals": "node dist/packages/factory-runner/src/proposals.js",

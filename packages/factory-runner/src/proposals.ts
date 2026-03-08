@@ -5,7 +5,7 @@ import { createArtilleryAdapter, readCloudEvents } from "@darkfactory/project-ad
 import type { CloudEventEnvelope } from "@darkfactory/contracts";
 
 const adapter = createArtilleryAdapter();
-const events = await readCloudEvents();
+const events = await readCloudEvents(undefined, { limit: 5000, order: "asc" });
 const feedback = events.filter((event) => event.type === "user_feedback");
 const incidents = events.filter((event) => event.type === "incident");
 

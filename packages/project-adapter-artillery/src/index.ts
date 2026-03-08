@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { CloudEventEnvelope, FeatureSpec } from "@darkfactory/contracts";
+import {
+  createFactoryApiClient,
+  isFactoryEventLocalMode,
+  type CloudEventEnvelope,
+  type FactoryEventsQuery,
+  type FeatureSpec
+} from "@darkfactory/contracts";
 import type {
   CanarySnapshot,
   DeploymentRecord,
@@ -17,6 +23,8 @@ interface AdapterConfig {
   evidenceDir: string;
   evaluationsDir: string;
   canaryPath: string;
+  factoryApiBaseUrl?: string;
+  localEventMode: boolean;
   stagingHook?: string;
   productionHook?: string;
   projectControlBaseUrl?: string;
@@ -30,12 +38,17 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
     evidenceDir: process.env.EVIDENCE_DIR ?? join(process.cwd(), "evidence"),
     evaluationsDir: process.env.EVALUATIONS_DIR ?? join(process.cwd(), "reports/evaluations"),
     canaryPath: process.env.CANARY_PATH ?? join(process.cwd(), "ops/canary/latest.json"),
+    factoryApiBaseUrl: process.env.FACTORY_API_BASE_URL,
+    localEventMode: isFactoryEventLocalMode(),
     stagingHook: process.env.RENDER_STAGING_DEPLOY_HOOK,
     productionHook: process.env.RENDER_PROD_DEPLOY_HOOK,
     projectControlBaseUrl: process.env.PROJECT_CONTROL_BASE_URL,
     dryRun: process.env.DRY_RUN === "1",
     ...overrides
   };
+  const eventClient = config.localEventMode
+    ? null
+    : createFactoryApiClient({ baseUrl: config.factoryApiBaseUrl, requireBaseUrl: true });
 
   return {
     listSpecs: async () => {
@@ -75,11 +88,16 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
         return;
       }
 
-      await mkdir(dirname(config.ledgerPath), { recursive: true });
-      await writeFile(config.ledgerPath, `${JSON.stringify(event)}\n`, {
-        encoding: "utf8",
-        flag: "a"
-      });
+      if (config.localEventMode) {
+        await mkdir(dirname(config.ledgerPath), { recursive: true });
+        await writeFile(config.ledgerPath, `${JSON.stringify(event)}\n`, {
+          encoding: "utf8",
+          flag: "a"
+        });
+        return;
+      }
+
+      await eventClient?.ingestEvent(event);
     },
 
     writeEvaluation: async (report: EvaluationReport) => {
@@ -183,15 +201,25 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
   };
 }
 
-export async function readCloudEvents(ledgerPath = process.env.LEDGER_PATH ?? join(process.cwd(), "var/ledger/events.ndjson")):
-Promise<Array<CloudEventEnvelope<Record<string, unknown>>>> {
+export async function readCloudEvents(
+  ledgerPath = process.env.LEDGER_PATH ?? join(process.cwd(), "var/ledger/events.ndjson"),
+  query: FactoryEventsQuery = {}
+): Promise<Array<CloudEventEnvelope<Record<string, unknown>>>> {
+  if (!isFactoryEventLocalMode()) {
+    const client = createFactoryApiClient({ requireBaseUrl: true });
+    return client.listEvents(query);
+  }
+
   try {
     const raw = await readFile(ledgerPath, "utf8");
-    return raw
+    return filterEvents(
+      raw
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as CloudEventEnvelope<Record<string, unknown>>);
+      .map((line) => JSON.parse(line) as CloudEventEnvelope<Record<string, unknown>>),
+      query
+    );
   } catch {
     return [];
   }
@@ -248,4 +276,40 @@ function addDeployRef(hook: string, commitRef: string | undefined): string {
   } catch {
     return hook;
   }
+}
+
+function filterEvents(
+  events: Array<CloudEventEnvelope<Record<string, unknown>>>,
+  query: FactoryEventsQuery
+): Array<CloudEventEnvelope<Record<string, unknown>>> {
+  const filtered = events.filter((event) => {
+    const data = event.data as Record<string, unknown>;
+    if (query.type && event.type !== query.type) {
+      return false;
+    }
+    if (query.action && String(data.action ?? "") !== query.action) {
+      return false;
+    }
+    if (query.specId && String(data.specId ?? "") !== query.specId) {
+      return false;
+    }
+    if (query.deployId && String(data.deployId ?? "") !== query.deployId) {
+      return false;
+    }
+    if (query.matchId && String(data.matchId ?? "") !== query.matchId) {
+      return false;
+    }
+    if (query.after && String(event.time) <= query.after) {
+      return false;
+    }
+    return true;
+  });
+
+  filtered.sort((left, right) => String(left.time).localeCompare(String(right.time)));
+  if (query.order !== "asc") {
+    filtered.reverse();
+  }
+
+  const limit = Math.min(Math.max(Number(query.limit ?? 100), 1), 5000);
+  return filtered.slice(0, limit);
 }

@@ -1,13 +1,29 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Client } from "pg";
-import type { CloudEventEnvelope, FactoryAdminStatus, AgentQualityStatus } from "@darkfactory/contracts";
+import {
+  isFactoryEventLocalMode,
+  summarizeCanary,
+  summarizeProjectHealth,
+  verifyScenario,
+  type CloudEventEnvelope,
+  type FactoryAdminStatus,
+  type AgentQualityStatus,
+  type FactoryEventsQuery,
+  type ProjectCanaryResponse,
+  type ProjectHealthResponse,
+  type ScenarioVerificationResponse
+} from "@darkfactory/contracts";
 
 export interface FactoryStore {
   init(): Promise<void>;
   ingest(event: CloudEventEnvelope<Record<string, unknown>>): Promise<void>;
+  getEvents(query?: FactoryEventsQuery): Promise<Array<CloudEventEnvelope<Record<string, unknown>>>>;
   getFactoryStatus(): Promise<FactoryAdminStatus>;
   getAgentStatus(): Promise<AgentQualityStatus>;
+  getProjectHealth(): Promise<ProjectHealthResponse>;
+  getProjectCanary(): Promise<ProjectCanaryResponse>;
+  verifyScenario(scenarioId: string): Promise<ScenarioVerificationResponse>;
   getDeployments(limit?: number): Promise<Array<Record<string, unknown>>>;
 }
 
@@ -23,10 +39,14 @@ export async function createFactoryStore(): Promise<FactoryStore> {
     return store;
   }
 
-  const path = process.env.FACTORY_STATE_PATH ?? join(process.cwd(), "var/factory/state.json");
-  const store = new FileFactoryStore(path);
-  await store.init();
-  return store;
+  if (isFactoryEventLocalMode()) {
+    const path = process.env.FACTORY_STATE_PATH ?? join(process.cwd(), "var/factory/state.json");
+    const store = new FileFactoryStore(path);
+    await store.init();
+    return store;
+  }
+
+  throw new Error("FACTORY_DATABASE_URL is required unless FACTORY_EVENT_MODE=local");
 }
 
 class FileFactoryStore implements FactoryStore {
@@ -47,22 +67,37 @@ class FileFactoryStore implements FactoryStore {
     await writeFile(this.path, `${JSON.stringify(state, null, 2)}\n`, "utf8");
   }
 
+  async getEvents(query: FactoryEventsQuery = {}): Promise<Array<CloudEventEnvelope<Record<string, unknown>>>> {
+    return filterEvents((await this.read()).events, query);
+  }
+
   async getFactoryStatus(): Promise<FactoryAdminStatus> {
-    const events = (await this.read()).events;
+    const events = await this.getEvents({ limit: 5000, order: "desc" });
     return summarizeFactory(events);
   }
 
   async getAgentStatus(): Promise<AgentQualityStatus> {
-    const events = (await this.read()).events;
+    const events = await this.getEvents({ limit: 5000, order: "desc" });
     return summarizeAgents(events);
   }
 
+  async getProjectHealth(): Promise<ProjectHealthResponse> {
+    const events = await this.getEvents({ type: "game_event", limit: 5000, order: "desc" });
+    return summarizeProjectHealth(events);
+  }
+
+  async getProjectCanary(): Promise<ProjectCanaryResponse> {
+    return summarizeCanary(await this.getProjectHealth());
+  }
+
+  async verifyScenario(scenarioId: string): Promise<ScenarioVerificationResponse> {
+    const events = await this.getEvents({ type: "game_event", limit: 5000, order: "desc" });
+    return verifyScenario(events, scenarioId);
+  }
+
   async getDeployments(limit = 20): Promise<Array<Record<string, unknown>>> {
-    const events = (await this.read()).events;
+    const events = await this.getEvents({ type: "pipeline_event", action: "spec_deployed", limit, order: "desc" });
     return events
-      .filter((event) => event.type === "pipeline_event" && String(event.data.action) === "spec_deployed")
-      .slice(-limit)
-      .reverse()
       .map((event) => ({
         id: event.id,
         at: event.time,
@@ -107,49 +142,84 @@ class PostgresFactoryStore implements FactoryStore {
     );
   }
 
+  async getEvents(query: FactoryEventsQuery = {}): Promise<Array<CloudEventEnvelope<Record<string, unknown>>>> {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+
+    if (query.type) {
+      values.push(query.type);
+      conditions.push(`event_type = $${values.length}`);
+    }
+    if (query.action) {
+      values.push(query.action);
+      conditions.push(`payload->'data'->>'action' = $${values.length}`);
+    }
+    if (query.specId) {
+      values.push(query.specId);
+      conditions.push(`payload->'data'->>'specId' = $${values.length}`);
+    }
+    if (query.deployId) {
+      values.push(query.deployId);
+      conditions.push(`payload->'data'->>'deployId' = $${values.length}`);
+    }
+    if (query.matchId) {
+      values.push(query.matchId);
+      conditions.push(`payload->'data'->>'matchId' = $${values.length}`);
+    }
+    if (query.after) {
+      values.push(query.after);
+      conditions.push(`event_time > $${values.length}::timestamptz`);
+    }
+
+    values.push(clampLimit(query.limit));
+    const limitPlaceholder = `$${values.length}`;
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const order = query.order === "asc" ? "ASC" : "DESC";
+    const result = await this.client.query(
+      `SELECT payload
+         FROM factory_events
+         ${whereClause}
+        ORDER BY event_time ${order}
+        LIMIT ${limitPlaceholder}`,
+      values
+    );
+
+    return result.rows.map((row: { payload: unknown }) => row.payload as CloudEventEnvelope<Record<string, unknown>>);
+  }
+
   async getFactoryStatus(): Promise<FactoryAdminStatus> {
-    const events = await this.recentEvents(5000);
+    const events = await this.getEvents({ limit: 5000, order: "desc" });
     return summarizeFactory(events);
   }
 
   async getAgentStatus(): Promise<AgentQualityStatus> {
-    const events = await this.recentEvents(5000);
+    const events = await this.getEvents({ limit: 5000, order: "desc" });
     return summarizeAgents(events);
   }
 
-  async getDeployments(limit = 20): Promise<Array<Record<string, unknown>>> {
-    const result = await this.client.query(
-      `SELECT payload
-         FROM factory_events
-        WHERE event_type = 'pipeline_event'
-          AND payload->'data'->>'action' = 'spec_deployed'
-        ORDER BY event_time DESC
-        LIMIT $1`,
-      [limit]
-    );
-
-    return result.rows.map((row: { payload: unknown }) => {
-      const event = row.payload as CloudEventEnvelope<Record<string, unknown>>;
-      return {
-        id: event.id,
-        at: event.time,
-        specId: event.data.specId,
-        deployId: event.data.deployId,
-        metadata: event.data.metadata ?? {}
-      };
-    });
+  async getProjectHealth(): Promise<ProjectHealthResponse> {
+    const events = await this.getEvents({ type: "game_event", limit: 5000, order: "desc" });
+    return summarizeProjectHealth(events);
   }
 
-  private async recentEvents(limit: number): Promise<Array<CloudEventEnvelope<Record<string, unknown>>>> {
-    const result = await this.client.query(
-      `SELECT payload
-         FROM factory_events
-        ORDER BY event_time DESC
-        LIMIT $1`,
-      [limit]
-    );
+  async getProjectCanary(): Promise<ProjectCanaryResponse> {
+    return summarizeCanary(await this.getProjectHealth());
+  }
 
-    return result.rows.map((row: { payload: unknown }) => row.payload as CloudEventEnvelope<Record<string, unknown>>);
+  async verifyScenario(scenarioId: string): Promise<ScenarioVerificationResponse> {
+    const events = await this.getEvents({ type: "game_event", limit: 5000, order: "desc" });
+    return verifyScenario(events, scenarioId);
+  }
+
+  async getDeployments(limit = 20): Promise<Array<Record<string, unknown>>> {
+    const events = await this.getEvents({ type: "pipeline_event", action: "spec_deployed", limit, order: "desc" });
+    return events.map((event) => ({
+      id: event.id,
+      at: event.time,
+      specId: event.data.specId,
+      deployId: event.data.deployId,
+      metadata: event.data.metadata ?? {}
+    }));
   }
 }
 
@@ -191,4 +261,47 @@ function summarizeAgents(events: Array<CloudEventEnvelope<Record<string, unknown
 
 function count(events: Array<CloudEventEnvelope<Record<string, unknown>>>, type: string, action: string): number {
   return events.filter((event) => event.type === type && String(event.data.action) === action).length;
+}
+
+function clampLimit(limit?: number): number {
+  const normalized = Number(limit ?? 100);
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    return 100;
+  }
+  return Math.min(Math.floor(normalized), 5000);
+}
+
+function filterEvents(
+  events: Array<CloudEventEnvelope<Record<string, unknown>>>,
+  query: FactoryEventsQuery
+): Array<CloudEventEnvelope<Record<string, unknown>>> {
+  const filtered = events.filter((event) => {
+    const data = event.data as Record<string, unknown>;
+    if (query.type && event.type !== query.type) {
+      return false;
+    }
+    if (query.action && String(data.action ?? "") !== query.action) {
+      return false;
+    }
+    if (query.specId && String(data.specId ?? "") !== query.specId) {
+      return false;
+    }
+    if (query.deployId && String(data.deployId ?? "") !== query.deployId) {
+      return false;
+    }
+    if (query.matchId && String(data.matchId ?? "") !== query.matchId) {
+      return false;
+    }
+    if (query.after && String(event.time) <= query.after) {
+      return false;
+    }
+    return true;
+  });
+
+  filtered.sort((left, right) => String(left.time).localeCompare(String(right.time)));
+  if (query.order !== "asc") {
+    filtered.reverse();
+  }
+
+  return filtered.slice(0, clampLimit(query.limit));
 }

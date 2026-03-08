@@ -1,9 +1,10 @@
 import { createArtilleryServer } from "./http.js";
 
 const port = Number(process.env.PORT ?? 4173);
+const host = process.env.HOST ?? "0.0.0.0";
 const server = createArtilleryServer();
 
-server.listen(port).then(() => {
+server.listen(port, host).then(() => {
   // eslint-disable-next-line no-console
   console.log(`Artillery server listening on http://127.0.0.1:${port}`);
 }).catch((error) => {

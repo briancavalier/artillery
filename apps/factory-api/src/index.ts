@@ -1,10 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
-import type { AgentQualityStatus, CloudEventEnvelope, FactoryAdminStatus } from "@darkfactory/contracts";
+import type {
+  AgentQualityStatus,
+  CloudEventEnvelope,
+  FactoryAdminStatus,
+  FactoryEventsQuery
+} from "@darkfactory/contracts";
 import { createFactoryStore } from "./storage.js";
 
 export interface FactoryApiServer {
-  listen(port: number): Promise<void>;
+  listen(port: number, host?: string): Promise<void>;
   close(): Promise<void>;
   port(): number;
 }
@@ -21,8 +26,8 @@ export async function createFactoryApiServer(): Promise<FactoryApiServer> {
   });
 
   return {
-    listen: async (port: number) => {
-      await new Promise<void>((resolve) => server.listen(port, resolve));
+    listen: async (port: number, host = "127.0.0.1") => {
+      await new Promise<void>((resolve) => server.listen(port, host, resolve));
     },
     close: async () => {
       await new Promise<void>((resolve, reject) => {
@@ -75,6 +80,21 @@ async function route(request: IncomingMessage, response: ServerResponse, store: 
     return;
   }
 
+  if (method === "GET" && url.pathname === "/v1/admin/events") {
+    const query: FactoryEventsQuery = {
+      type: asType(url.searchParams.get("type")),
+      action: asString(url.searchParams.get("action")),
+      specId: asString(url.searchParams.get("specId")),
+      deployId: asString(url.searchParams.get("deployId")),
+      matchId: asString(url.searchParams.get("matchId")),
+      after: asString(url.searchParams.get("after")),
+      order: asOrder(url.searchParams.get("order")),
+      limit: asNumber(url.searchParams.get("limit"))
+    };
+    await writeJson(response, 200, { events: await store.getEvents(query) });
+    return;
+  }
+
   if (method === "GET" && url.pathname === "/v1/admin/agents") {
     await writeJson(response, 200, await store.getAgentStatus());
     return;
@@ -83,6 +103,22 @@ async function route(request: IncomingMessage, response: ServerResponse, store: 
   if (method === "GET" && url.pathname === "/v1/admin/deployments") {
     const limit = Number(url.searchParams.get("limit") ?? 20);
     await writeJson(response, 200, { deployments: await store.getDeployments(Number.isFinite(limit) ? limit : 20) });
+    return;
+  }
+
+  if (method === "GET" && url.pathname === "/v1/admin/project-health") {
+    await writeJson(response, 200, await store.getProjectHealth());
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/v1/admin/project/canary") {
+    await writeJson(response, 200, await store.getProjectCanary());
+    return;
+  }
+
+  const verifyMatch = url.pathname.match(/^\/v1\/admin\/project\/scenarios\/([^/]+)\/verify$/);
+  if (method === "POST" && verifyMatch) {
+    await writeJson(response, 200, await store.verifyScenario(decodeURIComponent(verifyMatch[1] ?? "")));
     return;
   }
 
@@ -345,13 +381,42 @@ function renderDashboard(
       </table>
       <div class="links">
         <a href="/v1/admin/factory">Factory JSON</a>
+        <a href="/v1/admin/events?limit=50">Events JSON</a>
         <a href="/v1/admin/agents">Agent JSON</a>
         <a href="/v1/admin/deployments?limit=25">Deployments JSON</a>
+        <a href="/v1/admin/project-health">Project Health JSON</a>
       </div>
     </section>
   </main>
 </body>
 </html>`;
+}
+
+function asString(value: string | null): string | undefined {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function asNumber(value: string | null): number | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function asOrder(value: string | null): FactoryEventsQuery["order"] | undefined {
+  return value === "asc" || value === "desc" ? value : undefined;
+}
+
+function asType(value: string | null): FactoryEventsQuery["type"] | undefined {
+  return value === "game_event" ||
+    value === "pipeline_event" ||
+    value === "agent_event" ||
+    value === "user_feedback" ||
+    value === "incident"
+    ? value
+    : undefined;
 }
 
 function formatPercent(value: number): string {
@@ -370,7 +435,8 @@ function escapeHtml(value: string): string {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const server = await createFactoryApiServer();
   const port = Number(process.env.FACTORY_API_PORT ?? process.env.PORT ?? 4174);
-  await server.listen(port);
+  const host = process.env.FACTORY_API_HOST ?? process.env.HOST ?? "0.0.0.0";
+  await server.listen(port, host);
   console.log(`Factory API listening on http://127.0.0.1:${port}`);
 
   const shutdown = async (): Promise<void> => {

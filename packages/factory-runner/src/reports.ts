@@ -4,7 +4,7 @@ import { readCloudEvents } from "@darkfactory/project-adapter-artillery";
 import type { CloudEventEnvelope } from "@darkfactory/contracts";
 
 const reportDir = join(process.cwd(), "reports");
-const events = await readCloudEvents();
+const events = await readCloudEvents(undefined, { limit: 5000, order: "asc" });
 
 const game = {
   matchesCreated: count(events, "game_event", "match_created"),
