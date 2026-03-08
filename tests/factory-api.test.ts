@@ -47,6 +47,18 @@ test("factory api ingests CloudEvents and reports admin status", async () => {
 
     const agents = await fetch(`${base}/v1/admin/agents`);
     assert.equal(agents.status, 200);
+
+    const root = await fetch(`${base}/`, { redirect: "manual" });
+    assert.equal(root.status, 302);
+    assert.equal(root.headers.get("location"), "/dashboard");
+
+    const dashboard = await fetch(`${base}/dashboard`);
+    assert.equal(dashboard.status, 200);
+    const contentType = dashboard.headers.get("content-type");
+    assert.ok(contentType?.includes("text/html"));
+    const html = await dashboard.text();
+    assert.match(html, /Dark Factory Dashboard/);
+    assert.match(html, /Recent Deployments/);
   } finally {
     await server.close();
     delete process.env.FACTORY_STATE_PATH;

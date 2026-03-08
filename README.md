@@ -62,6 +62,7 @@ npm run start:factory-api
 ```
 
 Factory API default URL: `http://127.0.0.1:4174`
+Factory dashboard URL: `http://127.0.0.1:4174/dashboard`
 
 ## Factory Commands
 
