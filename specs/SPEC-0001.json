@@ -5,7 +5,7 @@
   "owner": "@maintainer",
   "status": "Draft",
   "decision": "pending",
-  "intent": "Ship a deterministic two-player artillery turn loop with authoritative command processing and replay-safe state transitions.",
+  "intent": "Ship a deterministic two-player artillery turn loop with authoritative command processing and replay-safe state transitions, with spec-controller governance validation on PR automation.",
   "scenarios": [
     {
       "id": "SCN-0001",
@@ -39,5 +39,5 @@
   ],
   "riskNotes": "Risk: command dedup and SSE ordering regressions can desync clients. Mitigation: idempotency tests + stream replay tests in CI.",
   "createdAt": "2026-03-07T00:00:00.000Z",
-  "updatedAt": "2026-03-07T00:00:00.000Z"
+  "updatedAt": "2026-03-08T02:05:00.000Z"
 }
