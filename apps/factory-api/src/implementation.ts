@@ -200,6 +200,10 @@ export async function processImplementationQueue(
         continue;
       }
 
+      task.prNumber = artifact.prNumber;
+      task.prUrl = artifact.prUrl;
+      task.branch = artifact.branch;
+
       if (options.skipRemoteMergeGate || process.env.IMPLEMENTATION_TEST_MODE === "1" || !options.owner || !options.repo) {
         const evidence = await adapter.generateScenarioEvidence?.(task.specId, {
           actor: options.actor,
@@ -208,6 +212,7 @@ export async function processImplementationQueue(
         }) ?? [];
         artifact.evidenceRefs = evidence.map((entry) => entry.artifact ?? "").filter(Boolean);
       } else {
+        let evidenceBlocked = false;
         await withCheckedOutBranch(options.baseBranch, artifact.branch, async () => {
           const checks = await runLocalChecks();
           artifact.testSummary = {
@@ -238,6 +243,36 @@ export async function processImplementationQueue(
           artifact.commitSha = currentSha;
         }
 
+        const evidenceGate = await evaluateRequiredEvidence(adapter, task.specId, task.verificationTargets);
+        if (!evidenceGate.ok) {
+          task.status = "blocked";
+          task.blockedReason = `Required scenario evidence missing or failed: ${evidenceGate.missing.join(", ")}`;
+          task.updatedAt = new Date().toISOString();
+          await store.writeImplementationRun({
+            ...run,
+            metadata: {
+              ...(run.metadata ?? {}),
+              orchestrationState: "blocked",
+              orchestrationReason: task.blockedReason,
+              missingScenarioEvidence: evidenceGate.missing
+            }
+          });
+          await store.writeImplementationArtifact(artifact);
+          await store.writeImplementationTask(task);
+          await emit(adapter, options, "implementation_task_blocked", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+            taskId: task.taskId,
+            runId: run.runId,
+            prNumber: artifact.prNumber,
+            branch: artifact.branch,
+            blockedReason: task.blockedReason,
+            filesChanged: artifact.filesChanged.length,
+            testsPassed: artifact.testSummary.passed,
+            testsFailed: artifact.testSummary.failed
+          });
+          evidenceBlocked = true;
+          return;
+        }
+
         const pull = await buildGitHubApi().getPullRequest(options.owner, options.repo, artifact.prNumber);
         if (pull.draft) {
           await buildGitHubApi().markReadyForReview(options.owner, options.repo, artifact.prNumber);
@@ -255,9 +290,44 @@ export async function processImplementationQueue(
         }
         });
 
+        if (evidenceBlocked) {
+          processed.push(task);
+          continue;
+        }
+
         await withCheckedOutBranch(artifact.branch, options.baseBranch, async () => {
           await execGit(process.cwd(), ["pull", "--ff-only", "origin", options.baseBranch]);
         });
+      }
+
+      const evidenceGate = await evaluateRequiredEvidence(adapter, task.specId, task.verificationTargets);
+      if (!evidenceGate.ok) {
+        task.status = "blocked";
+        task.blockedReason = `Required scenario evidence missing or failed: ${evidenceGate.missing.join(", ")}`;
+        task.updatedAt = new Date().toISOString();
+        await store.writeImplementationRun({
+          ...run,
+          metadata: {
+            ...(run.metadata ?? {}),
+            orchestrationState: "blocked",
+            orchestrationReason: task.blockedReason,
+            missingScenarioEvidence: evidenceGate.missing
+          }
+        });
+        await store.writeImplementationArtifact(artifact);
+        await store.writeImplementationTask(task);
+        await emit(adapter, options, "implementation_task_blocked", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+          taskId: task.taskId,
+          runId: run.runId,
+          prNumber: artifact.prNumber,
+          branch: artifact.branch,
+          blockedReason: task.blockedReason,
+          filesChanged: artifact.filesChanged.length,
+          testsPassed: artifact.testSummary.passed,
+          testsFailed: artifact.testSummary.failed
+        });
+        processed.push(task);
+        continue;
       }
 
       await runPipelineStep(adapter, { step: "implement", specId: task.specId, actor: options.actor, source: options.source, deployId: options.deployId });
@@ -265,9 +335,6 @@ export async function processImplementationQueue(
 
       task.status = "merged";
       task.updatedAt = new Date().toISOString();
-      task.prNumber = artifact.prNumber;
-      task.prUrl = artifact.prUrl;
-      task.branch = artifact.branch;
       await store.writeImplementationArtifact(artifact);
       await store.writeImplementationTask(task);
       await emit(adapter, options, "implementation_task_merged", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
@@ -399,6 +466,22 @@ function validateArtifact(task: ImplementationTask, artifact: ImplementationArti
   }
 
   return { ok: true };
+}
+
+async function evaluateRequiredEvidence(
+  adapter: FactoryAdapter,
+  specId: string,
+  scenarioIds: string[]
+): Promise<{ ok: true } | { ok: false; missing: string[] }> {
+  const missing: string[] = [];
+  for (const scenarioId of scenarioIds) {
+    const evidence = await adapter.readScenarioEvidence(specId, scenarioId);
+    if (!evidence || evidence.passed !== true) {
+      missing.push(scenarioId);
+    }
+  }
+
+  return missing.length > 0 ? { ok: false, missing } : { ok: true };
 }
 
 async function runLocalChecks(): Promise<{ passed: boolean; command: string; errorMessage?: string }> {

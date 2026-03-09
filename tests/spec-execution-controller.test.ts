@@ -174,6 +174,48 @@ test("execution controller blocks artifacts outside implementation allowlist", a
   }
 });
 
+test("execution controller does not merge when required evidence fails", async () => {
+  const workspace = await createTempWorkspace();
+  process.env.FACTORY_EVENT_MODE = "local";
+  process.env.FACTORY_STATE_PATH = join(workspace, "var/factory/state.json");
+  process.env.IMPLEMENTATION_TEST_MODE = "1";
+
+  try {
+    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Approved", ["SCN-0301", "SCN-0302"]));
+    const adapter = createArtilleryAdapter({
+      specDir: join(workspace, "specs"),
+      evidenceDir: join(workspace, "evidence"),
+      ledgerPath: join(workspace, "var/ledger/events.ndjson"),
+      evaluationsDir: join(workspace, "reports/evaluations"),
+      canaryPath: join(workspace, "ops/canary/latest.json"),
+      dryRun: false,
+      localEventMode: true
+    } as never);
+    const store = await createFactoryStore();
+
+    const result = await runSpecExecution({
+      adapter,
+      store,
+      provider: new DummyProvider(["apps/artillery-game/src/shared/simulation.ts"]),
+      owner: "owner",
+      repo: "repo",
+      baseBranch: "main",
+      commitSha: "base-sha",
+      reportRootDir: workspace
+    });
+
+    assert.equal(result.manifest.advanced[0]?.taskStatus, "blocked");
+    assert.match(result.manifest.advanced[0]?.blockedReason ?? "", /Required scenario evidence missing or failed/);
+    assert.equal(result.manifest.advanced[0]?.pullRequestNumber, 7);
+    const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
+    assert.equal(stored.status, "Approved");
+  } finally {
+    delete process.env.FACTORY_EVENT_MODE;
+    delete process.env.FACTORY_STATE_PATH;
+    delete process.env.IMPLEMENTATION_TEST_MODE;
+  }
+});
+
 test("execution controller surfaces provider failure diagnostics in the manifest", async () => {
   const workspace = await createTempWorkspace();
   process.env.FACTORY_EVENT_MODE = "local";
