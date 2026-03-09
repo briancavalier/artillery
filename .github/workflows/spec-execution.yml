@@ -59,7 +59,8 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add specs evidence reports/spec-execution reports/implementation-context var/factory/state.json
+          git add specs evidence reports/spec-execution reports/implementation-context
+          git add -f var/factory/state.json
           git commit -m "chore(factory): record implementation worker state"
           git push
       - name: Upload execution manifest
