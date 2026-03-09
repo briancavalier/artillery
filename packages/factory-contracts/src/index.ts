@@ -112,6 +112,9 @@ export interface FactoryAdminStatus {
     gateFailures: number;
     deploymentsToday: number;
     rollbacksToday: number;
+    implementationQueueDepth?: number;
+    implementationMergedToday?: number;
+    implementationBlockedToday?: number;
   };
 }
 
@@ -121,6 +124,132 @@ export interface AgentQualityStatus {
   acceptedProposals: number;
   acceptanceRate: number;
   regressionRate: number;
+}
+
+export type ImplementationTaskStatus =
+  | "queued"
+  | "running"
+  | "merge_ready"
+  | "blocked"
+  | "failed"
+  | "merged"
+  | "aborted";
+
+export type ImplementationRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "canceled";
+
+export type ImplementationResult = "blocked" | "failed" | "pr_opened" | "merged" | "merge_ready";
+
+export interface ImplementationTaskLimits {
+  maxTurns: number;
+  maxDurationMs: number;
+  maxCostUsd: number;
+  maxFilesChanged: number;
+}
+
+export interface ImplementationTaskPolicy {
+  allowAutoMerge: boolean;
+  allowShell: boolean;
+  allowNetwork: boolean;
+  blockedPaths: string[];
+}
+
+export interface ImplementationTask {
+  taskId: string;
+  specId: string;
+  source: string;
+  owner: string;
+  repo: string;
+  baseBranch: string;
+  baseSha: string;
+  targetBranch: string;
+  allowedPaths: string[];
+  verificationTargets: string[];
+  contextBundleRef: string;
+  attempt: number;
+  priority: number;
+  limits: ImplementationTaskLimits;
+  policy: ImplementationTaskPolicy;
+  status: ImplementationTaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  runId?: string;
+  provider?: string;
+  model?: string;
+  prNumber?: number;
+  prUrl?: string;
+  branch?: string;
+  blockedReason?: string;
+  failedReason?: string;
+}
+
+export interface ImplementationUsage {
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostUsd: number;
+}
+
+export interface ImplementationRun {
+  runId: string;
+  taskId: string;
+  provider: string;
+  model: string;
+  status: ImplementationRunStatus;
+  startedAt: string;
+  finishedAt?: string;
+  traceId?: string;
+  usage: ImplementationUsage;
+  result?: ImplementationResult;
+  summary?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ImplementationArtifact {
+  runId: string;
+  taskId: string;
+  prNumber: number;
+  prUrl: string;
+  branch: string;
+  commitSha: string;
+  filesChanged: string[];
+  testSummary: {
+    passed: number;
+    failed: number;
+    command?: string;
+  };
+  evidenceRefs: string[];
+  summaryMd: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ImplementationTaskRequest {
+  specId: string;
+  source: string;
+  owner: string;
+  repo: string;
+  baseBranch: string;
+  baseSha: string;
+  targetBranch: string;
+  allowedPaths: string[];
+  verificationTargets: string[];
+  contextBundleRef: string;
+  priority: number;
+  limits: ImplementationTaskLimits;
+  policy: ImplementationTaskPolicy;
+}
+
+export interface ImplementationTaskListResponse {
+  tasks: ImplementationTask[];
+}
+
+export interface ImplementationRunResponse {
+  run: ImplementationRun;
+  artifact?: ImplementationArtifact | null;
 }
 
 export const FACTORY_CONTRACT_VERSION = "v1";

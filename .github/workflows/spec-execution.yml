@@ -17,10 +17,14 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      checks: read
+      statuses: read
       id-token: write
       attestations: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -32,28 +36,39 @@ jobs:
         run: npm run policy:check
       - name: Run spec execution controller
         env:
+          FACTORY_EVENT_MODE: local
+          FACTORY_STATE_PATH: var/factory/state.json
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_SHA: ${{ github.sha }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-codex' }}
           DEPLOY_ID: run-${{ github.run_id }}-spec-execution
           FACTORY_API_BASE_URL: ${{ vars.PROD_FACTORY_API_BASE_URL || vars.PRODUCTION_FACTORY_API_BASE_URL || vars.STAGING_FACTORY_API_BASE_URL }}
-        run: npm run factory:spec-execution -- act
+        run: npm run factory:spec-execution
+      - name: Refresh main after implementation merges
+        run: |
+          git checkout main
+          git pull --ff-only origin main
       - name: Commit spec/evidence updates
         run: |
-          if git diff --quiet -- specs evidence reports/spec-execution; then
+          if git diff --quiet -- specs evidence reports/spec-execution reports/implementation-context var/factory/state.json; then
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add specs evidence reports/spec-execution
-          git commit -m "chore(factory): advance approved specs"
+          git add specs evidence reports/spec-execution reports/implementation-context var/factory/state.json
+          git commit -m "chore(factory): record implementation worker state"
           git push
       - name: Upload execution manifest
         uses: actions/upload-artifact@v4
         with:
           name: spec-execution-${{ github.run_id }}
-          path: reports/spec-execution/latest.json
+          path: |
+            reports/spec-execution/latest.json
+            reports/implementation-context/**
+            var/factory/state.json
       - name: Attest execution manifest
         uses: actions/attest-build-provenance@v1
         with:

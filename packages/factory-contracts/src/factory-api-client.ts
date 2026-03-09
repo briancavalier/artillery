@@ -1,9 +1,13 @@
 import type {
+  AgentQualityStatus,
   CloudEventEnvelope,
   FactoryAdminStatus,
   FactoryEventsQuery,
   FactoryEventsResponse,
-  AgentQualityStatus,
+  ImplementationRunResponse,
+  ImplementationTask,
+  ImplementationTaskListResponse,
+  ImplementationTaskRequest,
   ProjectCanaryResponse,
   ProjectHealthResponse,
   ScenarioVerificationResponse
@@ -112,6 +116,34 @@ export function createFactoryApiClient(options: FactoryApiClientOptions = {}) {
       return request<ScenarioVerificationResponse>(baseUrl, `/v1/admin/project/scenarios/${encodeURIComponent(scenarioId)}/verify`, {
         method: "POST"
       });
+    },
+
+    enqueueImplementationTask(payload: ImplementationTaskRequest): Promise<ImplementationTask> {
+      return request<ImplementationTask>(baseUrl, "/v1/admin/implementation/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+    },
+
+    listImplementationTasks(): Promise<ImplementationTaskListResponse> {
+      return request<ImplementationTaskListResponse>(baseUrl, "/v1/admin/implementation/tasks");
+    },
+
+    getImplementationTask(taskId: string): Promise<ImplementationTask> {
+      return request<ImplementationTask>(baseUrl, `/v1/admin/implementation/tasks/${encodeURIComponent(taskId)}`);
+    },
+
+    cancelImplementationTask(taskId: string): Promise<ImplementationTask> {
+      return request<ImplementationTask>(baseUrl, `/v1/admin/implementation/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST" });
+    },
+
+    retryImplementationTask(taskId: string): Promise<ImplementationTask> {
+      return request<ImplementationTask>(baseUrl, `/v1/admin/implementation/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
+    },
+
+    getImplementationRun(runId: string): Promise<ImplementationRunResponse> {
+      return request<ImplementationRunResponse>(baseUrl, `/v1/admin/implementation/runs/${encodeURIComponent(runId)}`);
     }
   };
 }

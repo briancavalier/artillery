@@ -2,23 +2,21 @@ import type { SpecStatus } from "@darkfactory/contracts";
 
 export interface ExecutionQueueItem {
   specId: string;
-  title: string;
+  taskId: string;
   branchName: string;
-  prTitle: string;
-  prBody: string;
-  trackingPath: string;
-  evidenceReadmePath: string;
+  status: string;
   created: boolean;
-  pullRequestNumber?: number;
-  pullRequestUrl?: string;
 }
 
 export interface ExecutionAdvanceItem {
   specId: string;
   previousStatus: SpecStatus;
   finalStatus: SpecStatus;
+  taskStatus: string;
   evidenceGenerated: number;
   passedEvidence: number;
+  pullRequestNumber?: number;
+  pullRequestUrl?: string;
 }
 
 export interface ExecutionManifest {

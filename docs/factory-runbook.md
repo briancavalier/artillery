@@ -19,9 +19,11 @@
    - `factory/veto` (requires comment `/factory-reason SPEC-xxxx: ...`)
    - `factory/rollback` (requires comment `/factory-reason SPEC-xxxx: ...`)
 7. Merge accepted spec PRs to `main`.
-8. `spec-execution.yml` queues implementation PRs automatically for accepted `Approved` specs.
-9. `spec-execution.yml` also runs adapter-backed evidence generation and advances supported specs through `Implemented` and `Verified`.
-10. `autonomous-deploy.yml` promotes verified specs through staging and production.
+8. `spec-execution.yml` enqueues accepted `Approved` specs into the factory implementation queue.
+9. The factory API worker builds project-scoped implementation context, invokes the Codex provider, and opens or updates draft PRs on `codex/implement-<spec-id>`.
+10. The worker runs local checks plus adapter-backed evidence generation and only auto-merges when evidence, CI, policy, and branch protection gates pass.
+11. Blocked or failed runs remain open as PRs with recorded task state; maintainers can retry or cancel through factory admin APIs.
+12. `autonomous-deploy.yml` promotes verified specs through staging and production.
 
 Centralized events:
 
@@ -31,8 +33,9 @@ Centralized events:
 ## Cloud Autonomous Flow
 
 - Accepted specs merged to `main` trigger `spec-execution.yml`.
-- Spec execution opens or reuses draft implementation PRs for pending code work.
-- Spec execution writes evidence files and bot-commits status transitions when verification passes.
+- Spec execution enqueues implementation tasks in factory storage and emits implementation telemetry.
+- The Codex worker opens or reuses draft implementation PRs for pending code work.
+- The worker writes evidence files, merges passing PRs, and then advances specs through `Implemented` and `Verified`.
 - Push to `main` triggers staging deployment via reusable workflow.
 - Canary gate must pass in staging before production promotion.
 - Canary breach triggers `npm run factory:auto-rollback` before workflow exit.

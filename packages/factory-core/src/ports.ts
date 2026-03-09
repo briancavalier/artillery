@@ -1,4 +1,11 @@
-import type { CloudEventEnvelope, FeatureSpec } from "@darkfactory/contracts";
+import type {
+  CloudEventEnvelope,
+  FeatureSpec,
+  ImplementationArtifact,
+  ImplementationRun,
+  ImplementationTask,
+  ImplementationTaskRequest
+} from "@darkfactory/contracts";
 
 export interface EvaluationReport {
   specId: string;
@@ -19,6 +26,23 @@ export interface EvidenceGenerationOptions {
   actor?: string;
   source?: string;
   deployId?: string;
+}
+
+export interface ImplementationScope {
+  allowedPaths: string[];
+  blockedPaths: string[];
+  maxFilesChanged?: number;
+}
+
+export interface ImplementationContext {
+  specId: string;
+  relevantFiles: string[];
+  allowedPaths: string[];
+  blockedPaths: string[];
+  recommendedCommands: string[];
+  evidenceCapabilities: string[];
+  reviewNotes: string[];
+  maxFilesChanged?: number;
 }
 
 export interface CanarySnapshot {
@@ -48,9 +72,31 @@ export interface FactoryAdapter {
   readEvaluation(specId: string): Promise<EvaluationReport | null>;
   readScenarioEvidence(specId: string, scenarioId: string): Promise<ScenarioEvidence | null>;
   generateScenarioEvidence?(specId: string, options?: EvidenceGenerationOptions): Promise<ScenarioEvidence[]>;
+  buildImplementationContext?(specId: string): Promise<ImplementationContext>;
+  getImplementationScope?(specId: string): Promise<ImplementationScope>;
   readCanarySnapshot(): Promise<CanarySnapshot | null>;
   deploy(environment: "staging" | "production", specId: string): Promise<DeploymentRecord>;
   rollback(specId: string, reason: string): Promise<void>;
+}
+
+export interface ImplementationProvider {
+  startTask(task: ImplementationTask): Promise<ImplementationRun>;
+  getRun(runId: string): Promise<ImplementationRun | null>;
+  cancelRun(runId: string): Promise<void>;
+  collectArtifacts(runId: string): Promise<ImplementationArtifact | null>;
+}
+
+export interface FactoryStorePort {
+  enqueueImplementationTask(payload: ImplementationTaskRequest): Promise<ImplementationTask>;
+  listImplementationTasks(): Promise<ImplementationTask[]>;
+  getImplementationTask(taskId: string): Promise<ImplementationTask | null>;
+  findImplementationTaskBySpecId(specId: string): Promise<ImplementationTask | null>;
+  leaseImplementationTask(): Promise<ImplementationTask | null>;
+  writeImplementationTask(task: ImplementationTask): Promise<void>;
+  writeImplementationRun(run: ImplementationRun): Promise<void>;
+  getImplementationRun(runId: string): Promise<ImplementationRun | null>;
+  writeImplementationArtifact(artifact: ImplementationArtifact): Promise<void>;
+  getImplementationArtifact(runId: string): Promise<ImplementationArtifact | null>;
 }
 
 export interface RunOptions {

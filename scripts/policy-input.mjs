@@ -91,6 +91,9 @@ function resolveImport(rootDir, fromFile, specifier) {
     if (specifier === "@darkfactory/project-adapter-artillery") {
       return "packages/project-adapter-artillery";
     }
+    if (specifier === "@darkfactory/implementation-provider-codex") {
+      return "packages/implementation-provider-codex";
+    }
   }
 
   return `external:${specifier}`;
@@ -114,6 +117,9 @@ function domainOf(path) {
   }
   if (path.startsWith("packages/project-adapter-artillery")) {
     return "project-adapter";
+  }
+  if (path.startsWith("packages/implementation-provider-codex")) {
+    return "implementation-provider";
   }
   if (path.startsWith("external:")) {
     return "external";

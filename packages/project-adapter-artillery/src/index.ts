@@ -14,9 +14,15 @@ import type {
   EvidenceGenerationOptions,
   EvaluationReport,
   FactoryAdapter,
+  ImplementationContext,
+  ImplementationScope,
   ScenarioEvidence,
   SpecRecord
 } from "@darkfactory/core";
+import {
+  buildArtilleryImplementationContext,
+  getArtilleryImplementationScope
+} from "./context.js";
 import { generateArtilleryScenarioEvidence } from "./evidence.js";
 
 interface AdapterConfig {
@@ -146,6 +152,14 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
         deployId: options?.deployId
       });
     },
+
+    buildImplementationContext: async (specId: string): Promise<ImplementationContext> => (
+      buildArtilleryImplementationContext(config.specDir, specId)
+    ),
+
+    getImplementationScope: async (specId: string): Promise<ImplementationScope> => (
+      getArtilleryImplementationScope(specId)
+    ),
 
     readCanarySnapshot: async () => {
       try {

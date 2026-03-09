@@ -29,6 +29,11 @@ test("project-control and factory-admin OpenAPI contracts expose required endpoi
     "/v1/admin/project-health",
     "/v1/admin/project/canary",
     "/v1/admin/project/scenarios/{scenarioId}/verify",
+    "/v1/admin/implementation/tasks",
+    "/v1/admin/implementation/tasks/{taskId}",
+    "/v1/admin/implementation/tasks/{taskId}/cancel",
+    "/v1/admin/implementation/tasks/{taskId}/retry",
+    "/v1/admin/implementation/runs/{runId}",
     "/v1/events"
   ]) {
     assert.ok(factoryAdmin.paths[path], `missing factory-admin path ${path}`);

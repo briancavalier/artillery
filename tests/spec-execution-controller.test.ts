@@ -3,59 +3,48 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { createTempWorkspace, readJson, writeJson } from "./helpers.js";
 import { createArtilleryAdapter } from "../packages/project-adapter-artillery/src/index.js";
+import { createFactoryStore } from "../apps/factory-api/src/storage.js";
 import { runSpecExecution } from "../packages/factory-runner/src/spec-execution/controller.js";
-import type { FeatureSpec } from "@darkfactory/contracts";
-import type { ExecutionPullRequest, SpecExecutionGitHubApi } from "../packages/factory-runner/src/spec-execution/types.js";
+import type { FeatureSpec, ImplementationArtifact, ImplementationRun, ImplementationTask } from "@darkfactory/contracts";
+import type { ImplementationProvider } from "@darkfactory/core";
 
-class MockExecutionGitHubApi implements SpecExecutionGitHubApi {
-  branches = new Map<string, string>();
-  files = new Map<string, string>();
-  pulls = new Map<string, ExecutionPullRequest>();
-  counter = 1;
+class DummyProvider implements ImplementationProvider {
+  constructor(private readonly filesChanged: string[]) {}
 
-  async getBranchSha(_owner: string, _repo: string, branch: string): Promise<string> {
-    return this.branches.get(branch) ?? "base-sha";
-  }
-
-  async createBranch(_owner: string, _repo: string, branch: string, sha: string): Promise<void> {
-    this.branches.set(branch, sha);
-  }
-
-  async getFileContent(_owner: string, _repo: string, path: string, ref: string): Promise<{ sha: string } | null> {
-    return this.files.has(`${ref}:${path}`) ? { sha: "sha-1" } : null;
-  }
-
-  async putFileContent(params: {
-    owner: string;
-    repo: string;
-    path: string;
-    branch: string;
-    message: string;
-    content: string;
-    sha?: string;
-  }): Promise<void> {
-    this.files.set(`${params.branch}:${params.path}`, params.content);
-  }
-
-  async findPullRequestByHead(_owner: string, _repo: string, head: string): Promise<ExecutionPullRequest | null> {
-    return this.pulls.get(head) ?? null;
-  }
-
-  async createPullRequest(params: {
-    owner: string;
-    repo: string;
-    head: string;
-    base: string;
-    title: string;
-    body: string;
-    draft: boolean;
-  }): Promise<ExecutionPullRequest> {
-    const pull = {
-      number: this.counter++,
-      htmlUrl: `https://example.test/${params.head}`
+  async startTask(task: ImplementationTask): Promise<ImplementationRun> {
+    return {
+      runId: `run-${task.specId}`,
+      taskId: task.taskId,
+      provider: "dummy",
+      model: "dummy-model",
+      status: "completed",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      result: "pr_opened",
+      usage: { inputTokens: 10, outputTokens: 20, estimatedCostUsd: 0.001 },
+      summary: "dummy run"
     };
-    this.pulls.set(`${params.owner}:${params.head}`, pull);
-    return pull;
+  }
+
+  async getRun(runId: string): Promise<ImplementationRun | null> {
+    return null;
+  }
+
+  async cancelRun(): Promise<void> {}
+
+  async collectArtifacts(runId: string): Promise<ImplementationArtifact | null> {
+    return {
+      runId,
+      taskId: runId.replace("run-", "task-"),
+      prNumber: 7,
+      prUrl: "https://example.test/pr/7",
+      branch: "codex/implement-spec-exec-1",
+      commitSha: "abc123",
+      filesChanged: this.filesChanged,
+      testSummary: { passed: 0, failed: 0, command: "dummy" },
+      evidenceRefs: [],
+      summaryMd: "dummy artifact"
+    };
   }
 }
 
@@ -76,58 +65,83 @@ function makeSpec(status: FeatureSpec["status"], scenarioIds: string[]): Feature
   };
 }
 
-test("execution controller queues implementation pull requests for approved specs", async () => {
+test("execution controller enqueues and verifies supported approved specs", async () => {
   const workspace = await createTempWorkspace();
-  await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Approved", ["SCN-0999"]));
-  const adapter = createArtilleryAdapter({
-    specDir: join(workspace, "specs"),
-    evidenceDir: join(workspace, "evidence"),
-    ledgerPath: join(workspace, "var/ledger/events.ndjson"),
-    evaluationsDir: join(workspace, "reports/evaluations"),
-    canaryPath: join(workspace, "ops/canary/latest.json"),
-    dryRun: false,
-    localEventMode: true
-  } as never);
-  const github = new MockExecutionGitHubApi();
+  process.env.FACTORY_EVENT_MODE = "local";
+  process.env.FACTORY_STATE_PATH = join(workspace, "var/factory/state.json");
+  process.env.IMPLEMENTATION_TEST_MODE = "1";
 
-  const result = await runSpecExecution({
-    adapter,
-    github,
-    owner: "owner",
-    repo: "repo",
-    baseBranch: "main",
-    commitSha: "base-sha",
-    queuePullRequests: true,
-    advanceSpecs: false,
-    reportRootDir: workspace
-  });
+  try {
+    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Approved", ["SCN-0001", "SCN-0002", "SCN-0003"]));
+    const adapter = createArtilleryAdapter({
+      specDir: join(workspace, "specs"),
+      evidenceDir: join(workspace, "evidence"),
+      ledgerPath: join(workspace, "var/ledger/events.ndjson"),
+      evaluationsDir: join(workspace, "reports/evaluations"),
+      canaryPath: join(workspace, "ops/canary/latest.json"),
+      dryRun: false,
+      localEventMode: true
+    } as never);
+    const store = await createFactoryStore();
 
-  assert.equal(result.manifest.queued.length, 1);
-  assert.equal(result.manifest.queued[0]?.created, true);
-  assert.ok(github.files.has("codex/implement-spec-exec-1:ops/spec-execution/SPEC-EXEC-1.json"));
+    const result = await runSpecExecution({
+      adapter,
+      store,
+      provider: new DummyProvider(["apps/artillery-game/src/shared/simulation.ts"]),
+      owner: "owner",
+      repo: "repo",
+      baseBranch: "main",
+      commitSha: "base-sha",
+      reportRootDir: workspace
+    });
+
+    assert.equal(result.manifest.queued.length, 1);
+    assert.equal(result.manifest.advanced[0]?.taskStatus, "merged");
+    const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
+    assert.equal(stored.status, "Verified");
+  } finally {
+    delete process.env.FACTORY_EVENT_MODE;
+    delete process.env.FACTORY_STATE_PATH;
+    delete process.env.IMPLEMENTATION_TEST_MODE;
+  }
 });
 
-test("execution controller advances supported approved specs to verified", async () => {
+test("execution controller blocks artifacts outside implementation allowlist", async () => {
   const workspace = await createTempWorkspace();
-  await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Approved", ["SCN-0001", "SCN-0002", "SCN-0003"]));
-  const adapter = createArtilleryAdapter({
-    specDir: join(workspace, "specs"),
-    evidenceDir: join(workspace, "evidence"),
-    ledgerPath: join(workspace, "var/ledger/events.ndjson"),
-    evaluationsDir: join(workspace, "reports/evaluations"),
-    canaryPath: join(workspace, "ops/canary/latest.json"),
-    dryRun: false,
-    localEventMode: true
-  } as never);
+  process.env.FACTORY_EVENT_MODE = "local";
+  process.env.FACTORY_STATE_PATH = join(workspace, "var/factory/state.json");
+  process.env.IMPLEMENTATION_TEST_MODE = "1";
 
-  const result = await runSpecExecution({
-    adapter,
-    queuePullRequests: false,
-    advanceSpecs: true,
-    reportRootDir: workspace
-  });
+  try {
+    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Approved", ["SCN-0001"]));
+    const adapter = createArtilleryAdapter({
+      specDir: join(workspace, "specs"),
+      evidenceDir: join(workspace, "evidence"),
+      ledgerPath: join(workspace, "var/ledger/events.ndjson"),
+      evaluationsDir: join(workspace, "reports/evaluations"),
+      canaryPath: join(workspace, "ops/canary/latest.json"),
+      dryRun: false,
+      localEventMode: true
+    } as never);
+    const store = await createFactoryStore();
 
-  assert.equal(result.manifest.advanced[0]?.finalStatus, "Verified");
-  const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
-  assert.equal(stored.status, "Verified");
+    const result = await runSpecExecution({
+      adapter,
+      store,
+      provider: new DummyProvider(["packages/factory-core/src/engine.ts"]),
+      owner: "owner",
+      repo: "repo",
+      baseBranch: "main",
+      commitSha: "base-sha",
+      reportRootDir: workspace
+    });
+
+    assert.equal(result.manifest.advanced[0]?.taskStatus, "blocked");
+    const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
+    assert.equal(stored.status, "Approved");
+  } finally {
+    delete process.env.FACTORY_EVENT_MODE;
+    delete process.env.FACTORY_STATE_PATH;
+    delete process.env.IMPLEMENTATION_TEST_MODE;
+  }
 });

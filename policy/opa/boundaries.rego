@@ -23,6 +23,13 @@ deny[msg] if {
 
 deny[msg] if {
   edge := input.imports[_]
+  edge.fromDomain == "implementation-provider"
+  edge.toDomain == "game"
+  msg := sprintf("implementation-provider must not import game internals: %s -> %s", [edge.from, edge.to])
+}
+
+deny[msg] if {
+  edge := input.imports[_]
   edge.fromDomain == "game"
   edge.toDomain == "factory-core"
   msg := sprintf("game must not import factory-core: %s -> %s", [edge.from, edge.to])

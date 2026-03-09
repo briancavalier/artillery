@@ -4,8 +4,11 @@ import type {
   AgentQualityStatus,
   CloudEventEnvelope,
   FactoryAdminStatus,
-  FactoryEventsQuery
+  FactoryEventsQuery,
+  ImplementationTaskRequest
 } from "@darkfactory/contracts";
+import { createArtilleryAdapter } from "@darkfactory/project-adapter-artillery";
+import { createCodexProvider, enqueueAcceptedSpecs, processImplementationQueue } from "./implementation.js";
 import { createFactoryStore } from "./storage.js";
 
 export interface FactoryApiServer {
@@ -60,13 +63,14 @@ async function route(request: IncomingMessage, response: ServerResponse, store: 
   }
 
   if (method === "GET" && url.pathname === "/dashboard") {
-    const [factory, agents, deployments] = await Promise.all([
+    const [factory, agents, deployments, tasks] = await Promise.all([
       store.getFactoryStatus(),
       store.getAgentStatus(),
-      store.getDeployments(25)
+      store.getDeployments(25),
+      store.listImplementationTasks()
     ]);
 
-    await writeHtml(response, 200, renderDashboard(factory, agents, deployments));
+    await writeHtml(response, 200, renderDashboard(factory, agents, deployments, tasks));
     return;
   }
 
@@ -119,6 +123,109 @@ async function route(request: IncomingMessage, response: ServerResponse, store: 
   const verifyMatch = url.pathname.match(/^\/v1\/admin\/project\/scenarios\/([^/]+)\/verify$/);
   if (method === "POST" && verifyMatch) {
     await writeJson(response, 200, await store.verifyScenario(decodeURIComponent(verifyMatch[1] ?? "")));
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/v1/admin/implementation/tasks") {
+    const body = await readJson<ImplementationTaskRequest>(request);
+    await writeJson(response, 200, await store.enqueueImplementationTask(body));
+    return;
+  }
+
+  if (method === "GET" && url.pathname === "/v1/admin/implementation/tasks") {
+    await writeJson(response, 200, { tasks: await store.listImplementationTasks() });
+    return;
+  }
+
+  const taskMatch = url.pathname.match(/^\/v1\/admin\/implementation\/tasks\/([^/]+)$/);
+  if (method === "GET" && taskMatch) {
+    const task = await store.getImplementationTask(decodeURIComponent(taskMatch[1] ?? ""));
+    await writeJson(response, task ? 200 : 404, task ?? { error: "Not found" });
+    return;
+  }
+
+  const cancelMatch = url.pathname.match(/^\/v1\/admin\/implementation\/tasks\/([^/]+)\/cancel$/);
+  if (method === "POST" && cancelMatch) {
+    const task = await store.getImplementationTask(decodeURIComponent(cancelMatch[1] ?? ""));
+    if (!task) {
+      await writeJson(response, 404, { error: "Not found" });
+      return;
+    }
+    task.status = "aborted";
+    task.updatedAt = new Date().toISOString();
+    await store.writeImplementationTask(task);
+    await writeJson(response, 200, task);
+    return;
+  }
+
+  const retryMatch = url.pathname.match(/^\/v1\/admin\/implementation\/tasks\/([^/]+)\/retry$/);
+  if (method === "POST" && retryMatch) {
+    const task = await store.getImplementationTask(decodeURIComponent(retryMatch[1] ?? ""));
+    if (!task) {
+      await writeJson(response, 404, { error: "Not found" });
+      return;
+    }
+    task.status = "queued";
+    task.runId = undefined;
+    task.blockedReason = undefined;
+    task.failedReason = undefined;
+    task.attempt += 1;
+    task.updatedAt = new Date().toISOString();
+    await store.writeImplementationTask(task);
+    await writeJson(response, 200, task);
+    return;
+  }
+
+  const runMatch = url.pathname.match(/^\/v1\/admin\/implementation\/runs\/([^/]+)$/);
+  if (method === "GET" && runMatch) {
+    const runId = decodeURIComponent(runMatch[1] ?? "");
+    const [run, artifact] = await Promise.all([
+      store.getImplementationRun(runId),
+      store.getImplementationArtifact(runId)
+    ]);
+    if (!run) {
+      await writeJson(response, 404, { error: "Not found" });
+      return;
+    }
+    await writeJson(response, 200, { run, artifact });
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/v1/admin/implementation/drain") {
+    const adapter = createArtilleryAdapter();
+    const repository = process.env.GITHUB_REPOSITORY ?? "";
+    const [owner, repo] = repository.split("/");
+    const provider = createCodexProvider(owner, repo);
+    const processed = await processImplementationQueue(store, adapter, provider, {
+      actor: process.env.FACTORY_ACTOR ?? "implementation_worker",
+      source: process.env.FACTORY_SOURCE ?? "darkfactory.implementation",
+      deployId: process.env.DEPLOY_ID,
+      repoFullName: repository,
+      owner,
+      repo,
+      baseBranch: process.env.GITHUB_REF_NAME ?? "main",
+      baseSha: process.env.GITHUB_SHA ?? ""
+    });
+    await writeJson(response, 200, { tasks: processed });
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/v1/admin/implementation/enqueue-accepted") {
+    const adapter = createArtilleryAdapter();
+    const repository = process.env.GITHUB_REPOSITORY ?? "";
+    const [owner, repo] = repository.split("/");
+    const queued = await enqueueAcceptedSpecs(store, adapter, {
+      actor: process.env.FACTORY_ACTOR ?? "implementation_worker",
+      source: process.env.FACTORY_SOURCE ?? "darkfactory.implementation",
+      deployId: process.env.DEPLOY_ID,
+      repoFullName: repository,
+      owner,
+      repo,
+      baseBranch: process.env.GITHUB_REF_NAME ?? "main",
+      baseSha: process.env.GITHUB_SHA ?? "",
+      reportRootDir: process.cwd()
+    });
+    await writeJson(response, 200, { tasks: queued });
     return;
   }
 
@@ -184,7 +291,8 @@ async function redirect(response: ServerResponse, location: string): Promise<voi
 function renderDashboard(
   factory: FactoryAdminStatus,
   agents: AgentQualityStatus,
-  deployments: Array<Record<string, unknown>>
+  deployments: Array<Record<string, unknown>>,
+  tasks: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["listImplementationTasks"]>>
 ): string {
   const statusClass = factory.status === "ok" ? "ok" : "degraded";
   const deploymentRows = deployments.length > 0
@@ -196,6 +304,9 @@ function renderDashboard(
       return `<tr><td>${at}</td><td>${specId}</td><td>${deployId}</td><td class="metadata">${metadata}</td></tr>`;
     }).join("")
     : `<tr><td colspan="4" class="empty">No deployments recorded.</td></tr>`;
+  const taskRows = tasks.length > 0
+    ? tasks.slice(0, 25).map((task) => `<tr><td>${escapeHtml(task.specId)}</td><td>${escapeHtml(task.status)}</td><td>${escapeHtml(task.provider ?? "")}</td><td>${escapeHtml(task.model ?? "")}</td><td>${escapeHtml(task.updatedAt)}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="empty">No implementation tasks recorded.</td></tr>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -205,222 +316,52 @@ function renderDashboard(
   <meta http-equiv="refresh" content="15">
   <title>Factory Dashboard</title>
   <style>
-    :root {
-      color-scheme: light;
-      --bg: #f6f8fb;
-      --card: #ffffff;
-      --text: #142033;
-      --muted: #4f6078;
-      --ok: #166534;
-      --warn: #92400e;
-      --border: #d8e1ef;
-      --accent: #1d4ed8;
-    }
+    :root { color-scheme: light; --bg: #f6f8fb; --card: #ffffff; --text: #142033; --muted: #4f6078; --ok: #166534; --warn: #92400e; --border: #d8e1ef; --accent: #1d4ed8; }
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      padding: 24px;
-      background: linear-gradient(180deg, #eef3ff, var(--bg));
-      color: var(--text);
-      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-    }
+    body { margin: 0; padding: 24px; background: linear-gradient(180deg, #eef3ff, var(--bg)); color: var(--text); font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
     h1, h2 { margin: 0 0 12px; }
     p { margin: 0; color: var(--muted); }
     a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .layout {
-      max-width: 1120px;
-      margin: 0 auto;
-      display: grid;
-      gap: 16px;
-    }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      align-items: baseline;
-      flex-wrap: wrap;
-    }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 16px;
-      box-shadow: 0 2px 10px rgba(20, 32, 51, 0.05);
-    }
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 12px;
-    }
-    .label {
-      color: var(--muted);
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 4px;
-    }
-    .value {
-      font-size: 28px;
-      font-weight: 700;
-      line-height: 1.2;
-    }
-    .status {
-      font-size: 14px;
-      font-weight: 600;
-      padding: 5px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-    }
-    .status.ok {
-      color: var(--ok);
-      background: #ecfdf5;
-      border-color: #bbf7d0;
-    }
-    .status.degraded {
-      color: var(--warn);
-      background: #fff7ed;
-      border-color: #fed7aa;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 12px;
-      font-size: 14px;
-    }
-    th, td {
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-      padding: 10px 8px;
-      vertical-align: top;
-    }
-    th {
-      color: var(--muted);
-      font-weight: 600;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .metadata {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      max-width: 420px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .empty { color: var(--muted); }
-    .links {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-top: 8px;
-      font-size: 14px;
-    }
+    .layout { max-width: 1120px; margin: 0 auto; display: grid; gap: 16px; }
+    .header { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; box-shadow: 0 2px 10px rgba(20, 32, 51, 0.05); }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+    .value { font-size: 28px; font-weight: 700; line-height: 1.2; }
+    .status { font-size: 14px; font-weight: 600; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); }
+    .status.ok { color: var(--ok); background: #ecfdf5; border-color: #bbf7d0; }
+    .status.degraded { color: var(--warn); background: #fff7ed; border-color: #fdba74; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 14px; }
+    th { color: var(--muted); font-weight: 600; }
+    .metadata { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--muted); }
+    .empty { text-align: center; color: var(--muted); }
   </style>
 </head>
 <body>
-  <main class="layout">
+  <div class="layout">
     <section class="header">
       <div>
-        <h1>Dark Factory Dashboard</h1>
-        <p>Auto-refreshes every 15 seconds. Generated at ${escapeHtml(factory.generatedAt)}.</p>
+        <h1>Factory Dashboard</h1>
+        <p>Dark factory status, deployment history, and implementation worker health.</p>
       </div>
-      <div class="status ${statusClass}">Factory: ${escapeHtml(factory.status.toUpperCase())}</div>
+      <span class="status ${statusClass}">${escapeHtml(factory.status)}</span>
     </section>
-
     <section class="cards">
-      <article class="card">
-        <div class="label">Queued Specs</div>
-        <div class="value">${factory.pipeline.queuedSpecs}</div>
-      </article>
-      <article class="card">
-        <div class="label">Gate Failures</div>
-        <div class="value">${factory.pipeline.gateFailures}</div>
-      </article>
-      <article class="card">
-        <div class="label">Deployments (Current Window)</div>
-        <div class="value">${factory.pipeline.deploymentsToday}</div>
-      </article>
-      <article class="card">
-        <div class="label">Rollbacks (Current Window)</div>
-        <div class="value">${factory.pipeline.rollbacksToday}</div>
-      </article>
+      <article class="card"><div class="label">Queued Specs</div><div class="value">${factory.pipeline.queuedSpecs}</div></article>
+      <article class="card"><div class="label">Implementation Queue</div><div class="value">${factory.pipeline.implementationQueueDepth ?? 0}</div></article>
+      <article class="card"><div class="label">Merged Tasks</div><div class="value">${factory.pipeline.implementationMergedToday ?? 0}</div></article>
+      <article class="card"><div class="label">Blocked Tasks</div><div class="value">${factory.pipeline.implementationBlockedToday ?? 0}</div></article>
+      <article class="card"><div class="label">Gate Failures</div><div class="value">${factory.pipeline.gateFailures}</div></article>
+      <article class="card"><div class="label">Deployments Today</div><div class="value">${factory.pipeline.deploymentsToday}</div></article>
+      <article class="card"><div class="label">Acceptance Rate</div><div class="value">${agents.acceptanceRate.toFixed(2)}</div></article>
+      <article class="card"><div class="label">Regression Rate</div><div class="value">${agents.regressionRate.toFixed(2)}</div></article>
     </section>
-
-    <section class="cards">
-      <article class="card">
-        <div class="label">Agent Proposals</div>
-        <div class="value">${agents.proposals}</div>
-      </article>
-      <article class="card">
-        <div class="label">Accepted Proposals</div>
-        <div class="value">${agents.acceptedProposals}</div>
-      </article>
-      <article class="card">
-        <div class="label">Acceptance Rate</div>
-        <div class="value">${formatPercent(agents.acceptanceRate)}</div>
-      </article>
-      <article class="card">
-        <div class="label">Regression Rate</div>
-        <div class="value">${formatPercent(agents.regressionRate)}</div>
-      </article>
-    </section>
-
-    <section class="card">
-      <h2>Recent Deployments</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Spec</th>
-            <th>Deploy ID</th>
-            <th>Metadata</th>
-          </tr>
-        </thead>
-        <tbody>${deploymentRows}</tbody>
-      </table>
-      <div class="links">
-        <a href="/v1/admin/factory">Factory JSON</a>
-        <a href="/v1/admin/events?limit=50">Events JSON</a>
-        <a href="/v1/admin/agents">Agent JSON</a>
-        <a href="/v1/admin/deployments?limit=25">Deployments JSON</a>
-        <a href="/v1/admin/project-health">Project Health JSON</a>
-      </div>
-    </section>
-  </main>
+    <section class="card"><h2>Recent Deployments</h2><table><thead><tr><th>At</th><th>Spec</th><th>Deploy</th><th>Metadata</th></tr></thead><tbody>${deploymentRows}</tbody></table></section>
+    <section class="card"><h2>Implementation Tasks</h2><table><thead><tr><th>Spec</th><th>Status</th><th>Provider</th><th>Model</th><th>Updated</th></tr></thead><tbody>${taskRows}</tbody></table></section>
+  </div>
 </body>
 </html>`;
-}
-
-function asString(value: string | null): string | undefined {
-  const trimmed = value?.trim() ?? "";
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function asNumber(value: string | null): number | undefined {
-  if (value === null) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function asOrder(value: string | null): FactoryEventsQuery["order"] | undefined {
-  return value === "asc" || value === "desc" ? value : undefined;
-}
-
-function asType(value: string | null): FactoryEventsQuery["type"] | undefined {
-  return value === "game_event" ||
-    value === "pipeline_event" ||
-    value === "agent_event" ||
-    value === "user_feedback" ||
-    value === "incident"
-    ? value
-    : undefined;
-}
-
-function formatPercent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
 }
 
 function escapeHtml(value: string): string {
@@ -428,22 +369,40 @@ function escapeHtml(value: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
+    .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
 
+function asType(value: string | null): FactoryEventsQuery["type"] | undefined {
+  if (!value) {
+    return undefined;
+  }
+  if (["game_event", "pipeline_event", "agent_event", "user_feedback", "incident"].includes(value)) {
+    return value as FactoryEventsQuery["type"];
+  }
+  return undefined;
+}
+
+function asString(value: string | null): string | undefined {
+  return value?.trim() || undefined;
+}
+
+function asOrder(value: string | null): FactoryEventsQuery["order"] | undefined {
+  return value === "asc" || value === "desc" ? value : undefined;
+}
+
+function asNumber(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const port = Number(process.env.PORT ?? 4174);
+  const host = process.env.HOST ?? "0.0.0.0";
   const server = await createFactoryApiServer();
-  const port = Number(process.env.FACTORY_API_PORT ?? process.env.PORT ?? 4174);
-  const host = process.env.FACTORY_API_HOST ?? process.env.HOST ?? "0.0.0.0";
   await server.listen(port, host);
-  console.log(`Factory API listening on http://127.0.0.1:${port}`);
-
-  const shutdown = async (): Promise<void> => {
-    await server.close();
-    process.exit(0);
-  };
-
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  console.log(`[factory-api] listening on http://${host}:${port}`);
 }

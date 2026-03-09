@@ -97,3 +97,18 @@ test_deny_spec_execution_prod_secret if {
   denies := data.darkfactory.deny with input as test_input
   denies["spec-execution workflow must not reference production secrets"]
 }
+
+test_deny_implementation_provider_importing_game if {
+  test_input := {
+    "contracts": {"issues": []},
+    "workflows": [],
+    "imports": [{
+      "from": "packages/implementation-provider-codex/src/provider.ts",
+      "to": "apps/artillery-game/src/server/http.ts",
+      "fromDomain": "implementation-provider",
+      "toDomain": "game"
+    }]
+  }
+  denies := data.darkfactory.deny with input as test_input
+  denies["implementation-provider must not import game internals: packages/implementation-provider-codex/src/provider.ts -> apps/artillery-game/src/server/http.ts"]
+}

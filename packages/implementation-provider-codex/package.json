@@ -1,0 +1,17 @@
+{
+  "name": "@darkfactory/implementation-provider-codex",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "../../../dist/packages/implementation-provider-codex/src/index.js",
+  "types": "../../../dist/packages/implementation-provider-codex/src/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@darkfactory/contracts": "1.0.0",
+    "@darkfactory/core": "1.0.0"
+  }
+}

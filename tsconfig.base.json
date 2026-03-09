@@ -8,6 +8,7 @@
       "@darkfactory/contracts": ["packages/factory-contracts/src/index.ts"],
       "@darkfactory/core": ["packages/factory-core/src/index.ts"],
       "@darkfactory/runner": ["packages/factory-runner/src/index.ts"],
+      "@darkfactory/implementation-provider-codex": ["packages/implementation-provider-codex/src/index.ts"],
       "@darkfactory/project-adapter-artillery": ["packages/project-adapter-artillery/src/index.ts"],
       "@artillery/game": ["apps/artillery-game/src/server/index.ts"]
     },

@@ -9,6 +9,10 @@
     "test": "node --test ../../dist/tests/factory-api.test.js"
   },
   "dependencies": {
+    "@darkfactory/contracts": "1.0.0",
+    "@darkfactory/core": "1.0.0",
+    "@darkfactory/implementation-provider-codex": "1.0.0",
+    "@darkfactory/project-adapter-artillery": "1.0.0",
     "pg": "^8.16.3"
   }
 }

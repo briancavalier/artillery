@@ -82,6 +82,70 @@
         }
       }
     },
+    "/v1/admin/implementation/tasks": {
+      "post": {
+        "summary": "Queue an implementation task",
+        "operationId": "enqueueImplementationTask",
+        "responses": {
+          "200": {
+            "description": "Queued implementation task"
+          }
+        }
+      },
+      "get": {
+        "summary": "List implementation tasks",
+        "operationId": "listImplementationTasks",
+        "responses": {
+          "200": {
+            "description": "Implementation task list"
+          }
+        }
+      }
+    },
+    "/v1/admin/implementation/tasks/{taskId}": {
+      "get": {
+        "summary": "Get implementation task",
+        "operationId": "getImplementationTask",
+        "responses": {
+          "200": {
+            "description": "Implementation task"
+          }
+        }
+      }
+    },
+    "/v1/admin/implementation/tasks/{taskId}/cancel": {
+      "post": {
+        "summary": "Cancel implementation task",
+        "operationId": "cancelImplementationTask",
+        "responses": {
+          "200": {
+            "description": "Canceled implementation task"
+          }
+        }
+      }
+    },
+    "/v1/admin/implementation/tasks/{taskId}/retry": {
+      "post": {
+        "summary": "Retry implementation task",
+        "operationId": "retryImplementationTask",
+        "responses": {
+          "200": {
+            "description": "Retried implementation task"
+          }
+        }
+      }
+    },
+    "/v1/admin/implementation/runs/{runId}": {
+      "get": {
+        "summary": "Get implementation run",
+        "operationId": "getImplementationRun",
+        "responses": {
+          "200": {
+            "description": "Implementation run"
+          }
+        }
+      }
+    },
     "/v1/events": {
       "post": {
         "summary": "Ingest CloudEvents telemetry",

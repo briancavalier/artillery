@@ -138,6 +138,9 @@ Factory API:
 - `FACTORY_DATABASE_URL` (Postgres)
 - `FACTORY_API_BASE_URL` (required for centralized event readers/writers outside local mode)
 - `FACTORY_STATE_PATH` (local-mode file fallback only)
+- `OPENAI_API_KEY` (required for the Codex implementation provider in cloud execution)
+- `OPENAI_MODEL` (optional; defaults to `gpt-5-codex`)
+- `OPENAI_PROJECT` (optional project scoping for provider usage)
 
 ## Human + Agent Spec Intake
 
@@ -174,10 +177,16 @@ Rationale directive required for `veto` and `rollback`:
 
 `spec-execution.yml` runs on trusted `main` pushes and handles the gap after a spec is approved and merged.
 
-- Queues accepted `Approved` specs into draft implementation PRs on `codex/implement-<spec-id>`.
-- Seeds implementation branches with:
-  - `ops/spec-execution/SPEC-xxxx.json`
-  - `evidence/SPEC-xxxx/README.md`
+- Enqueues accepted `Approved` specs into the factory implementation queue.
+- Builds a project-scoped implementation context and path allowlist from the artillery adapter.
+- Invokes the pluggable Codex implementation provider on `codex/implement-<spec-id>`.
+- Runs local build/test/policy checks plus adapter-backed scenario evidence generation.
+- Auto-marks PRs ready and auto-merges only after evidence, CI, policy, and branch protection gates pass.
+- Leaves the PR open and the task `blocked` or `failed` when:
+  - evidence is incomplete
+  - CI/policy checks fail
+  - artifact paths violate the implementation scope
+  - the spec is vetoed or rolled back during execution
 - Auto-advances accepted specs through `Implemented -> Verified` when the project adapter can generate required scenario evidence.
 - Leaves unsupported scenarios in place with explicit failed evidence files instead of promoting them.
 

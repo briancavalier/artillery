@@ -110,6 +110,56 @@ test("factory store ingests CloudEvents and reports centralized admin status", a
 
     const verifyBody = await store.verifyScenario("SCN-0001");
     assert.equal(verifyBody.passed, true);
+
+    const queued = await store.enqueueImplementationTask({
+      specId: "SPEC-API-1",
+      source: "human",
+      owner: "@maintainer",
+      repo: "owner/repo",
+      baseBranch: "main",
+      baseSha: "abc123",
+      targetBranch: "codex/implement-spec-api-1",
+      allowedPaths: ["apps/artillery-game/**"],
+      verificationTargets: ["SCN-0001"],
+      contextBundleRef: "reports/implementation-context/SPEC-API-1.md",
+      priority: 100,
+      limits: { maxTurns: 4, maxDurationMs: 1000, maxCostUsd: 1, maxFilesChanged: 10 },
+      policy: { allowAutoMerge: true, allowShell: true, allowNetwork: false, blockedPaths: ["packages/factory-core/**"] }
+    });
+    assert.equal(queued.status, "queued");
+
+    const leased = await store.leaseImplementationTask();
+    assert.equal(leased?.taskId, queued.taskId);
+    assert.equal(leased?.status, "running");
+
+    await store.writeImplementationRun({
+      runId: "run-1",
+      taskId: queued.taskId,
+      provider: "dummy",
+      model: "dummy-model",
+      status: "completed",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      result: "pr_opened",
+      usage: { inputTokens: 1, outputTokens: 2, estimatedCostUsd: 0.01 }
+    });
+    await store.writeImplementationArtifact({
+      runId: "run-1",
+      taskId: queued.taskId,
+      prNumber: 7,
+      prUrl: "https://example.test/pr/7",
+      branch: "codex/implement-spec-api-1",
+      commitSha: "deadbeef",
+      filesChanged: ["apps/artillery-game/src/shared/simulation.ts"],
+      testSummary: { passed: 1, failed: 0 },
+      evidenceRefs: [],
+      summaryMd: "summary"
+    });
+
+    const storedRun = await store.getImplementationRun("run-1");
+    const storedArtifact = await store.getImplementationArtifact("run-1");
+    assert.equal(storedRun?.provider, "dummy");
+    assert.equal(storedArtifact?.prNumber, 7);
   } finally {
     delete process.env.FACTORY_EVENT_MODE;
     delete process.env.FACTORY_STATE_PATH;
