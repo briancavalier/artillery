@@ -101,3 +101,17 @@ test("renderApplyRepairPrompt includes apply error and file snapshots", () => {
   assert.match(prompt, /Current file snapshots for the touched files:/);
   assert.match(prompt, /Do not modify unrelated files such as README\.md unless the spec explicitly requires it\./);
 });
+
+test("extractPatchedPaths ignores scratch paths not present in unified diff headers", () => {
+  const patch = [
+    "diff --git a/apps/artillery-game/src/client/main.ts b/apps/artillery-game/src/client/main.ts",
+    "--- a/apps/artillery-game/src/client/main.ts",
+    "+++ b/apps/artillery-game/src/client/main.ts",
+    "@@",
+    "-const ready = false;",
+    "+const ready = true;"
+  ].join("\n");
+  assert.deepEqual(codexProviderInternals.extractPatchedPaths(patch), [
+    "apps/artillery-game/src/client/main.ts"
+  ]);
+});

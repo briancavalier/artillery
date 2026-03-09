@@ -173,6 +173,7 @@ export class CodexImplementationProvider implements ImplementationProvider {
       const patchPath = join(worktreePath, ".darkfactory.patch");
       await writeFile(patchPath, `${parsed.patch}\n`, "utf8");
       await execFileAsync("git", ["apply", "--reject", "--whitespace=nowarn", patchPath], { cwd: worktreePath, env: process.env });
+      await cleanupScratchFiles(worktreePath);
 
       const changedFiles = await collectChangedFiles(worktreePath);
       const artifact = await publishBranchAndPullRequest({
@@ -307,6 +308,16 @@ async function collectChangedFiles(worktreePath: string): Promise<string[]> {
     .filter(Boolean)
     .map((line) => line.replace(/^[A-Z? ]+/, "").trim())
     .filter(Boolean);
+}
+
+async function cleanupScratchFiles(worktreePath: string): Promise<void> {
+  const scratchPaths = [
+    join(worktreePath, ".darkfactory.patch"),
+    join(worktreePath, "reports", "implementation")
+  ];
+  for (const path of scratchPaths) {
+    await rm(path, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 function renderUserPrompt(task: ImplementationTask, contextText: string): string {
