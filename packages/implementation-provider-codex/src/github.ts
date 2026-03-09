@@ -9,6 +9,7 @@ export interface GitHubPullRequestDetails {
   htmlUrl: string;
   headRef: string;
   headSha: string;
+  nodeId: string;
   state: string;
   draft: boolean;
   mergeable: boolean | null;
@@ -23,10 +24,25 @@ interface PullRequestResponse {
   number: number;
   html_url: string;
   head: { ref: string; sha: string };
+  node_id: string;
   state: string;
   draft: boolean;
   mergeable: boolean | null;
   mergeable_state: string;
+}
+
+interface GraphQlResponse<T> {
+  data?: T;
+  errors?: Array<{ message?: string }>;
+}
+
+interface PullRequestNodeQuery {
+  repository: {
+    pullRequest: {
+      id: string;
+      isDraft: boolean;
+    } | null;
+  } | null;
 }
 
 export class GitHubAutomationApi {
@@ -62,7 +78,49 @@ export class GitHubAutomationApi {
   }
 
   async markReadyForReview(owner: string, repo: string, pullNumber: number): Promise<void> {
-    await this.request("POST", `/repos/${owner}/${repo}/pulls/${pullNumber}/ready_for_review`);
+    try {
+      await this.request("POST", `/repos/${owner}/${repo}/pulls/${pullNumber}/ready_for_review`);
+      return;
+    } catch (error) {
+      if (error instanceof GitHubApiError && error.status === 422) {
+        return;
+      }
+      if (!(error instanceof GitHubApiError) || error.status !== 404) {
+        throw error;
+      }
+    }
+
+    const pull = await this.requestGraphQl<PullRequestNodeQuery>(
+      [
+        "query PullRequestNode($owner: String!, $repo: String!, $number: Int!) {",
+        "  repository(owner: $owner, name: $repo) {",
+        "    pullRequest(number: $number) {",
+        "      id",
+        "      isDraft",
+        "    }",
+        "  }",
+        "}"
+      ].join("\n"),
+      { owner, repo, number: pullNumber }
+    );
+    const node = pull.repository?.pullRequest;
+    if (!node || !node.isDraft) {
+      return;
+    }
+
+    await this.requestGraphQl(
+      [
+        "mutation MarkReady($pullRequestId: ID!) {",
+        "  markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {",
+        "    pullRequest {",
+        "      number",
+        "      isDraft",
+        "    }",
+        "  }",
+        "}"
+      ].join("\n"),
+      { pullRequestId: node.id }
+    );
   }
 
   async getPullRequest(owner: string, repo: string, pullNumber: number): Promise<GitHubPullRequestDetails> {
@@ -91,6 +149,7 @@ export class GitHubAutomationApi {
       headers: {
         Authorization: `Bearer ${this.token}`,
         Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
         "Content-Type": "application/json",
         "User-Agent": "darkfactory-codex-provider"
       },
@@ -102,7 +161,7 @@ export class GitHubAutomationApi {
     }
 
     if (!response.ok) {
-      throw new Error(`GitHub API ${method} ${path} failed: ${response.status} ${(await response.text()).trim()}`);
+      throw new GitHubApiError(method, path, response.status, (await response.text()).trim());
     }
 
     if (response.status === 204) {
@@ -110,6 +169,41 @@ export class GitHubAutomationApi {
     }
 
     return await response.json() as T;
+  }
+
+  private async requestGraphQl<T = unknown>(query: string, variables: Record<string, unknown>): Promise<T> {
+    const response = await this.fetchImpl(`${this.apiBase}/graphql`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+        "User-Agent": "darkfactory-codex-provider"
+      },
+      body: JSON.stringify({ query, variables })
+    });
+
+    const payload = await response.json() as GraphQlResponse<T>;
+    if (!response.ok) {
+      throw new GitHubApiError("POST", "/graphql", response.status, JSON.stringify(payload.errors ?? payload));
+    }
+    if (payload.errors?.length) {
+      throw new Error(`GitHub GraphQL failed: ${payload.errors.map((error) => error.message ?? "Unknown error").join("; ")}`);
+    }
+    return payload.data as T;
+  }
+}
+
+class GitHubApiError extends Error {
+  constructor(
+    readonly method: string,
+    readonly path: string,
+    readonly status: number,
+    readonly responseText: string
+  ) {
+    super(`GitHub API ${method} ${path} failed: ${status} ${responseText}`);
+    this.name = "GitHubApiError";
   }
 }
 
@@ -123,6 +217,7 @@ function toPullRequestDetails(pull: PullRequestResponse): GitHubPullRequestDetai
     htmlUrl: pull.html_url,
     headRef: pull.head.ref,
     headSha: pull.head.sha,
+    nodeId: pull.node_id,
     state: pull.state,
     draft: pull.draft,
     mergeable: pull.mergeable,
