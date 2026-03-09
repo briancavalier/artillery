@@ -403,7 +403,7 @@ function validateArtifact(task: ImplementationTask, artifact: ImplementationArti
 async function runLocalChecks(): Promise<{ passed: boolean; command: string; errorMessage?: string }> {
   const command = "npm test && npm run contract:check && npm run policy:check";
   try {
-    await execFileAsync("/bin/zsh", ["-lc", `export XDG_STATE_HOME=/tmp/fnm-state; eval \"$(fnm env --shell zsh)\"; nvm use >/dev/null; ${command}`], {
+    await execFileAsync("/bin/bash", ["-lc", buildPortableNodeCommand(command)], {
       cwd: process.cwd(),
       env: process.env,
       timeout: Number(process.env.IMPLEMENTATION_MAX_DURATION_MS ?? 900000)
@@ -413,6 +413,15 @@ async function runLocalChecks(): Promise<{ passed: boolean; command: string; err
     const stderr = error instanceof Error && "stderr" in error ? String((error as { stderr?: string }).stderr ?? "") : "";
     return { passed: false, command, errorMessage: stderr || (error instanceof Error ? error.message : String(error)) };
   }
+}
+
+function buildPortableNodeCommand(command: string): string {
+  return [
+    "export XDG_STATE_HOME=/tmp/fnm-state",
+    "if command -v fnm >/dev/null 2>&1; then eval \"$(fnm env --shell bash)\"; fi",
+    "if command -v nvm >/dev/null 2>&1; then nvm use >/dev/null; fi",
+    command
+  ].join("; ");
 }
 
 async function waitForRemoteChecks(owner: string, repo: string, sha: string, maxDurationMs: number): Promise<void> {
@@ -469,3 +478,7 @@ async function execGit(cwd: string, args: string[]): Promise<{ stdout: string; s
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+export const implementationInternals = {
+  buildPortableNodeCommand
+};
