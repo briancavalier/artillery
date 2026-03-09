@@ -57,6 +57,59 @@
       "branch": "codex/implement-spec-0003",
       "blockedReason": "Recovered from pre-evidence-gate merge; requeue required under fixed gate.",
       "failedReason": null
+    },
+    {
+      "taskId": "8a8ffc2d-8f21-41fe-93c0-cc6c0d129fbc",
+      "specId": "SPEC-0003",
+      "source": "human",
+      "owner": "@briancavalier",
+      "repo": "briancavalier/artillery",
+      "baseBranch": "main",
+      "baseSha": "73465b8d07d4e259f0b382a0e4c03a3087e7a717",
+      "targetBranch": "codex/implement-spec-0003",
+      "allowedPaths": [
+        "apps/artillery-game/**",
+        "tests/**",
+        "evidence/SPEC-0003/**",
+        "docs/**"
+      ],
+      "verificationTargets": [
+        "SCN-0301",
+        "SCN-0302",
+        "SCN-0303",
+        "SCN-0304"
+      ],
+      "contextBundleRef": "/home/runner/work/artillery/artillery/reports/implementation-context/SPEC-0003.md",
+      "attempt": 0,
+      "priority": 100,
+      "limits": {
+        "maxTurns": 6,
+        "maxDurationMs": 900000,
+        "maxCostUsd": 5,
+        "maxFilesChanged": 24
+      },
+      "policy": {
+        "allowAutoMerge": true,
+        "allowShell": true,
+        "allowNetwork": false,
+        "blockedPaths": [
+          "apps/factory-api/**",
+          "packages/factory-core/**",
+          "packages/factory-runner/**",
+          "packages/implementation-provider-codex/**",
+          ".github/workflows/**",
+          "policy/**",
+          ".env*",
+          "render.yaml"
+        ]
+      },
+      "status": "failed",
+      "createdAt": "2026-03-09T01:23:56.307Z",
+      "updatedAt": "2026-03-09T01:24:33.334Z",
+      "runId": "b1df8e5b-de95-4f3f-b231-314ab4c9a181",
+      "provider": "openai-codex",
+      "model": "gpt-5-codex",
+      "failedReason": "error: corrupt patch at line 10 (artifact missing)"
     }
   ],
   "implementationRuns": [
@@ -101,6 +154,53 @@
             "repair": true,
             "repairKind": "format",
             "rawOutputPreview": "SUMMARY:\nDocumented missing SPEC-0003 specification details as a blocker.\n\nPATCH:\n```diff\ndiff --git a/docs/SPEC-0003-blocked.md b/docs/SPEC-0003-blocked.md\nnew file mode 100644\n--- /dev/null\n+++ b/docs/SPEC-0003-blocked.md\n@@\n+# SPEC-0003 Blocked\n+\n+Implementation for SPEC-0003 remains blocked because the necessary specification\n+details were not included in the provided context bundle. Without the spec it is\n+impossible to determine the required behavior changes.\n```"
+          }
+        ]
+      }
+    },
+    {
+      "runId": "b1df8e5b-de95-4f3f-b231-314ab4c9a181",
+      "taskId": "8a8ffc2d-8f21-41fe-93c0-cc6c0d129fbc",
+      "provider": "openai-codex",
+      "model": "gpt-5-codex",
+      "status": "failed",
+      "startedAt": "2026-03-09T01:23:56.309Z",
+      "usage": {
+        "inputTokens": 624,
+        "outputTokens": 1758,
+        "estimatedCostUsd": 0.01836
+      },
+      "finishedAt": "2026-03-09T01:24:33.317Z",
+      "result": "failed",
+      "traceId": "resp_077d2b2c6a07ba610069ae21468e3481a091aeedb2a172ad55",
+      "summary": "error: corrupt patch at line 10",
+      "metadata": {
+        "branch": "codex/implement-spec-0003",
+        "phase": "provider_response",
+        "reason": "invalid_patch",
+        "attempts": [
+          {
+            "attempt": 1,
+            "responseId": "resp_0dc004f7ea6187ef0069ae212d416081929d2d0c0a519ba396",
+            "repair": false,
+            "validationError": "Codex did not return a patch.",
+            "rawOutputPreview": "SUMMARY:\nBlocked: SPEC-0003 contents unavailable, so implementation cannot proceed safely.\n\nPATCH:"
+          },
+          {
+            "attempt": 2,
+            "responseId": "resp_078c1fb417cdcb840069ae21386b1881929aec019b50d574b1",
+            "repair": true,
+            "repairKind": "format",
+            "validationError": "Checking patch docs/SPEC-0003-blocker.md...\nerror: docs/SPEC-0003-blocker.md: already exists in working directory",
+            "rawOutputPreview": "SUMMARY:\nDocumented the SPEC-0003 blocker due to missing spec details.\n\nPATCH:\n```diff\ndiff --git a/docs/SPEC-0003-blocker.md b/docs/SPEC-0003-blocker.md\nnew file mode 100644\n--- /dev/null\n+++ b/docs/SPEC-0003-blocker.md\n@@\n+# SPEC-0003 Blocker\n+\n+- Reason: SPEC-0003 contents were unavailable in the provided implementation context.\n+- Impact: Unable to implement or validate the required changes safely.\n+- Mitigation: Please supply the complete SPEC-0003 details or clarify the expected changes so implementation can proceed.\n```"
+          },
+          {
+            "attempt": 3,
+            "responseId": "resp_077d2b2c6a07ba610069ae21468e3481a091aeedb2a172ad55",
+            "repair": true,
+            "repairKind": "format",
+            "validationError": "error: corrupt patch at line 10",
+            "rawOutputPreview": "SUMMARY:\nDocumented SPEC-0003 blocker since spec details remain unavailable.\n\nPATCH:\n```diff\ndiff --git a/docs/SPEC-0003-blocker.md b/docs/SPEC-0003-blocker.md\n--- a/docs/SPEC-0003-blocker.md\n+++ b/docs/SPEC-0003-blocker.md\n@@ -0,0 +1,7 @@\n+# SPEC-0003 Blocker\n+\n+- Reason: SPEC-0003 contents were unavailable in the provided implementation context.\n+- Impact: Unable to implement or validate the required changes safely.\n+- Mitigation: Please supply the complete SPEC-0003 details or clarify the expected changes so implementation can proceed.\n```"
           }
         ]
       }
