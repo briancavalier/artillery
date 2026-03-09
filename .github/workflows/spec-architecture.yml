@@ -44,6 +44,9 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-codex' }}
+          OPENAI_REQUEST_TIMEOUT_MS: 120000
+          OPENAI_REQUEST_MAX_ATTEMPTS: 4
+          OPENAI_REQUEST_BACKOFF_MS: 1500
           DEPLOY_ID: run-${{ github.run_id }}-spec-architecture
           FACTORY_API_BASE_URL: ${{ vars.PROD_FACTORY_API_BASE_URL || vars.PRODUCTION_FACTORY_API_BASE_URL || vars.STAGING_FACTORY_API_BASE_URL }}
         run: npm run factory:spec-architecture
@@ -52,12 +55,19 @@ jobs:
           git pull --rebase --autostash origin main
       - name: Commit architecture updates
         run: |
-          if git diff --quiet -- specs architecture reports/spec-architecture reports/architecture-context var/factory/state.json; then
+          DIFF_PATHS=(specs reports/spec-architecture reports/architecture-context var/factory/state.json)
+          if [ -d architecture ]; then
+            DIFF_PATHS+=(architecture)
+          fi
+          if git diff --quiet -- "${DIFF_PATHS[@]}"; then
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add specs architecture reports/spec-architecture reports/architecture-context
+          git add specs reports/spec-architecture reports/architecture-context
+          if [ -d architecture ]; then
+            git add architecture
+          fi
           git add -f var/factory/state.json
           git commit -m "chore(factory): record architecture worker state"
           git push
@@ -68,6 +78,7 @@ jobs:
           path: |
             reports/spec-architecture/latest.json
             reports/architecture-context/**
+            architecture/**
             var/factory/state.json
       - name: Attest architecture manifest
         uses: actions/attest-build-provenance@v1
