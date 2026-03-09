@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { CloudEventEnvelope, ImplementationArtifact, ImplementationRun, ImplementationTask } from "@darkfactory/contracts";
+import type { CloudEventEnvelope, FeatureSpec, ImplementationArtifact, ImplementationRun, ImplementationTask } from "@darkfactory/contracts";
 import { runPipelineStep, type FactoryAdapter, type FactoryStorePort, type ImplementationProvider } from "@darkfactory/core";
 import { createArtilleryAdapter } from "@darkfactory/project-adapter-artillery";
 import { CodexImplementationProvider, GitHubAutomationApi } from "@darkfactory/implementation-provider-codex";
@@ -47,7 +47,7 @@ export async function enqueueAcceptedSpecs(
       maxFilesChanged: 24
     };
     const context = await adapter.buildImplementationContext?.(record.data.specId);
-    const contextBundleRef = await writeContextBundle(options.reportRootDir ?? process.cwd(), record.data.specId, context);
+    const contextBundleRef = await writeContextBundle(options.reportRootDir ?? process.cwd(), record.data, context);
 
     const task = await store.enqueueImplementationTask({
       specId: record.data.specId,
@@ -404,21 +404,44 @@ function buildGitHubApi(token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN
   return new GitHubAutomationApi(token);
 }
 
-async function writeContextBundle(rootDir: string, specId: string, context: Awaited<ReturnType<NonNullable<FactoryAdapter["buildImplementationContext"]>>> | undefined): Promise<string> {
+async function writeContextBundle(
+  rootDir: string,
+  spec: FeatureSpec,
+  context: Awaited<ReturnType<NonNullable<FactoryAdapter["buildImplementationContext"]>>> | undefined
+): Promise<string> {
+  const specId = spec.specId;
   const path = join(rootDir, "reports", "implementation-context", `${specId}.md`);
   await mkdir(dirname(path), { recursive: true });
-  const body = context
+  const specSection = [
+    `# Accepted Spec ${specId}`,
+    "",
+    `Title: ${spec.title}`,
+    `Intent: ${spec.intent}`,
+    `Risk notes: ${spec.riskNotes}`,
+    "",
+    "## Required Scenarios",
+    ...spec.scenarios.map((scenario) => `- ${scenario.id}: ${scenario.description} (required=${scenario.required})`),
+    "",
+    "## Verification Map",
+    ...spec.verification.map((entry) => `- ${entry.scenarioId}: ${entry.checks.join(", ")}`)
+  ];
+  const contextSection = context
     ? [
-        `# Implementation Context for ${specId}`,
         "",
+        "## Project Context",
         `Relevant files: ${context.relevantFiles.join(", ")}`,
         `Allowed paths: ${context.allowedPaths.join(", ")}`,
         `Blocked paths: ${context.blockedPaths.join(", ")}`,
         `Recommended commands: ${context.recommendedCommands.join(", ")}`,
         `Evidence capabilities: ${context.evidenceCapabilities.join(", ")}`,
         `Review notes: ${context.reviewNotes.join(" | ")}`
-      ].join("\n")
-    : `# Implementation Context for ${specId}\n\nNo adapter context available.`;
+      ]
+    : [
+        "",
+        "## Project Context",
+        "No adapter context available."
+      ];
+  const body = [...specSection, ...contextSection].join("\n");
   await writeFile(path, `${body}\n`, "utf8");
   return path;
 }

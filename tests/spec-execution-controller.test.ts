@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { createTempWorkspace, readJson, writeJson } from "./helpers.js";
 import { createArtilleryAdapter } from "../packages/project-adapter-artillery/src/index.js";
 import { createFactoryStore } from "../apps/factory-api/src/storage.js";
@@ -125,6 +126,10 @@ test("execution controller enqueues and verifies supported approved specs", asyn
 
     assert.equal(result.manifest.queued.length, 1);
     assert.equal(result.manifest.advanced[0]?.taskStatus, "merged");
+    const contextBundle = await readFile(join(workspace, "reports/implementation-context/SPEC-EXEC-1.md"), "utf8");
+    assert.match(contextBundle, /# Accepted Spec SPEC-EXEC-1/);
+    assert.match(contextBundle, /Intent: Advance accepted specs/);
+    assert.match(contextBundle, /## Required Scenarios/);
     const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
     assert.equal(stored.status, "Verified");
   } finally {

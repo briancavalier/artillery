@@ -49,6 +49,11 @@ interface PatchCheckResult {
   message: string;
 }
 
+interface BlockedResponse {
+  blocked: boolean;
+  reason?: string;
+}
+
 export class CodexImplementationProvider implements ImplementationProvider {
   private readonly runs = new Map<string, StoredRun>();
 
@@ -122,6 +127,37 @@ export class CodexImplementationProvider implements ImplementationProvider {
         parsed = await requestCodexResponse(apiKey, task, branch, prompt);
         const rawOutputPath = join(worktreePath, "reports", "implementation", `${task.specId}.attempt-${attempt}.txt`);
         await writeFile(rawOutputPath, `${parsed.rawText}\n`, "utf8");
+
+        const blocked = classifyBlockedResponse(parsed.summary, parsed.patch);
+        if (blocked.blocked) {
+          run = {
+            ...run,
+            status: "blocked",
+            finishedAt: new Date().toISOString(),
+            result: "blocked",
+            traceId: parsed.responseId,
+            summary: blocked.reason ?? parsed.summary,
+            usage: parsed.usage,
+            metadata: {
+              branch,
+              phase: "provider_response",
+              reason: "blocked_by_model",
+              attempts: [
+                ...attempts,
+                {
+                  attempt,
+                  responseId: parsed.responseId,
+                  repair: attempt > 1,
+                  repairKind,
+                  rawOutputPreview: truncate(parsed.rawText, 2000)
+                }
+              ]
+            }
+          };
+          this.runs.set(runId, { run, artifact: null });
+          await writeFile(summaryPath, `${parsed.summary}\n`, "utf8");
+          return run;
+        }
 
         patchCheck = checkPatchText(parsed.patch);
         if (patchCheck.kind === "ok") {
@@ -339,7 +375,7 @@ function renderUserPrompt(task: ImplementationTask, contextText: string): string
     "```",
     "The PATCH section must be a valid unified diff that git apply can consume directly.",
     "Do not return prose, markdown lists, or code fences outside the required SUMMARY/PATCH structure.",
-    "If the task is blocked, explain why in SUMMARY and return an empty PATCH section.",
+    "If the task is blocked, start SUMMARY with 'Blocked:' and leave the PATCH section empty.",
     "",
     "Context bundle:",
     contextText
@@ -370,7 +406,9 @@ function renderRepairPrompt(task: ImplementationTask, contextText: string, prior
     contextText,
     "",
     `Allowed paths: ${task.allowedPaths.join(", ")}.`,
-    `Blocked paths: ${task.policy.blockedPaths.join(", ")}.`
+    `Blocked paths: ${task.policy.blockedPaths.join(", ")}.`,
+    "If you are blocked, start SUMMARY with 'Blocked:' and leave PATCH empty.",
+    "If you are editing an existing file, do not use 'new file mode', '/dev/null', or '@@ -0,0' headers."
   ].join("\n");
 }
 
@@ -409,7 +447,8 @@ function renderApplyRepairPrompt(
     "",
     `Allowed paths: ${task.allowedPaths.join(", ")}.`,
     `Blocked paths: ${task.policy.blockedPaths.join(", ")}.`,
-    "Do not modify unrelated files such as README.md unless the spec explicitly requires it."
+    "Do not modify unrelated files such as README.md unless the spec explicitly requires it.",
+    "If you are editing an existing file, do not use 'new file mode', '/dev/null', or '@@ -0,0' headers."
   ].join("\n");
 }
 
@@ -514,6 +553,21 @@ function checkPatchText(patch: string): PatchCheckResult {
   return { kind: "ok", message: "" };
 }
 
+function classifyBlockedResponse(summary: string, patch: string): BlockedResponse {
+  const normalizedSummary = summary.trim();
+  if (!normalizedSummary) {
+    return { blocked: false };
+  }
+  const explicitlyBlocked = /^blocked:/i.test(normalizedSummary);
+  if (!explicitlyBlocked) {
+    return { blocked: false };
+  }
+  if (patch.trim()) {
+    return { blocked: false };
+  }
+  return { blocked: true, reason: normalizedSummary };
+}
+
 async function validatePatchWithGit(worktreePath: string, patchPath: string): Promise<PatchCheckResult> {
   try {
     await execFileAsync("git", ["apply", "--check", "--verbose", patchPath], { cwd: worktreePath, env: process.env });
@@ -600,6 +654,7 @@ export const codexProviderInternals = {
   extractSummary,
   extractPatch,
   checkPatchText,
+  classifyBlockedResponse,
   isLikelyUnifiedDiff,
   renderRepairPrompt,
   renderApplyRepairPrompt,

@@ -56,6 +56,34 @@ test("checkPatchText accepts plausible unified diff", () => {
   assert.deepEqual(codexProviderInternals.checkPatchText(patch), { kind: "ok", message: "" });
 });
 
+test("classifyBlockedResponse accepts blocked summary with empty patch", () => {
+  assert.deepEqual(
+    codexProviderInternals.classifyBlockedResponse(
+      "Blocked: SPEC-0003 contents unavailable, so implementation cannot proceed safely.",
+      ""
+    ),
+    {
+      blocked: true,
+      reason: "Blocked: SPEC-0003 contents unavailable, so implementation cannot proceed safely."
+    }
+  );
+});
+
+test("classifyBlockedResponse does not hide a non-empty patch", () => {
+  const patch = [
+    "diff --git a/docs/SPEC-0003-blocker.md b/docs/SPEC-0003-blocker.md",
+    "--- a/docs/SPEC-0003-blocker.md",
+    "+++ b/docs/SPEC-0003-blocker.md",
+    "@@",
+    "-old",
+    "+new"
+  ].join("\n");
+  assert.deepEqual(
+    codexProviderInternals.classifyBlockedResponse("Blocked: incomplete spec.", patch),
+    { blocked: false }
+  );
+});
+
 test("renderRepairPrompt includes validation feedback and prior output", () => {
   const prompt = codexProviderInternals.renderRepairPrompt(
     task,
@@ -66,6 +94,8 @@ test("renderRepairPrompt includes validation feedback and prior output", () => {
   assert.match(prompt, /Validation error: Codex returned PATCH content that is not a valid unified diff\./);
   assert.match(prompt, /Previous invalid output:/);
   assert.match(prompt, /Allowed paths: apps\/artillery-game\/\*\*, tests\/\*\*\./);
+  assert.match(prompt, /If you are blocked, start SUMMARY with 'Blocked:' and leave PATCH empty\./);
+  assert.match(prompt, /do not use 'new file mode', '\/dev\/null', or '@@ -0,0' headers/i);
 });
 
 test("extractPatchedPaths returns touched files from unified diff", () => {
