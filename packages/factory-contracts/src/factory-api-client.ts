@@ -1,5 +1,9 @@
 import type {
   AgentQualityStatus,
+  ArchitectureRunResponse,
+  ArchitectureTask,
+  ArchitectureTaskListResponse,
+  ArchitectureTaskRequest,
   CloudEventEnvelope,
   FactoryAdminStatus,
   FactoryEventsQuery,
@@ -116,6 +120,34 @@ export function createFactoryApiClient(options: FactoryApiClientOptions = {}) {
       return request<ScenarioVerificationResponse>(baseUrl, `/v1/admin/project/scenarios/${encodeURIComponent(scenarioId)}/verify`, {
         method: "POST"
       });
+    },
+
+    enqueueArchitectureTask(payload: ArchitectureTaskRequest): Promise<ArchitectureTask> {
+      return request<ArchitectureTask>(baseUrl, "/v1/admin/architecture/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+    },
+
+    listArchitectureTasks(): Promise<ArchitectureTaskListResponse> {
+      return request<ArchitectureTaskListResponse>(baseUrl, "/v1/admin/architecture/tasks");
+    },
+
+    getArchitectureTask(taskId: string): Promise<ArchitectureTask> {
+      return request<ArchitectureTask>(baseUrl, `/v1/admin/architecture/tasks/${encodeURIComponent(taskId)}`);
+    },
+
+    cancelArchitectureTask(taskId: string): Promise<ArchitectureTask> {
+      return request<ArchitectureTask>(baseUrl, `/v1/admin/architecture/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST" });
+    },
+
+    retryArchitectureTask(taskId: string): Promise<ArchitectureTask> {
+      return request<ArchitectureTask>(baseUrl, `/v1/admin/architecture/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
+    },
+
+    getArchitectureRun(runId: string): Promise<ArchitectureRunResponse> {
+      return request<ArchitectureRunResponse>(baseUrl, `/v1/admin/architecture/runs/${encodeURIComponent(runId)}`);
     },
 
     enqueueImplementationTask(payload: ImplementationTaskRequest): Promise<ImplementationTask> {

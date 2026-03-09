@@ -1,4 +1,8 @@
 import type {
+  ArchitectureArtifact,
+  ArchitectureRun,
+  ArchitectureTask,
+  ArchitectureTaskRequest,
   CloudEventEnvelope,
   FeatureSpec,
   ImplementationArtifact,
@@ -54,6 +58,22 @@ export interface ImplementationContext {
   maxFilesChanged?: number;
 }
 
+export interface ArchitectureScope {
+  artifactRoot: string;
+  blockedPaths: string[];
+}
+
+export interface ArchitectureContext {
+  specId: string;
+  relevantFiles: string[];
+  readPaths: string[];
+  seedFiles: string[];
+  discoveryGoals: string[];
+  reviewNotes: string[];
+  artifactRoot: string;
+  blockedPaths: string[];
+}
+
 export interface CanarySnapshot {
   generatedAt: string;
   pass: boolean;
@@ -83,9 +103,18 @@ export interface FactoryAdapter {
   generateScenarioEvidence?(specId: string, options?: EvidenceGenerationOptions): Promise<ScenarioEvidence[]>;
   buildImplementationContext?(specId: string): Promise<ImplementationContext>;
   getImplementationScope?(specId: string): Promise<ImplementationScope>;
+  buildArchitectureContext?(specId: string): Promise<ArchitectureContext>;
+  getArchitectureScope?(specId: string): Promise<ArchitectureScope>;
   readCanarySnapshot(): Promise<CanarySnapshot | null>;
   deploy(environment: "staging" | "production", specId: string): Promise<DeploymentRecord>;
   rollback(specId: string, reason: string): Promise<void>;
+}
+
+export interface ArchitectureProvider {
+  startTask(task: ArchitectureTask): Promise<ArchitectureRun>;
+  getRun(runId: string): Promise<ArchitectureRun | null>;
+  cancelRun(runId: string): Promise<void>;
+  collectArtifacts(runId: string): Promise<ArchitectureArtifact | null>;
 }
 
 export interface ImplementationProvider {
@@ -96,6 +125,16 @@ export interface ImplementationProvider {
 }
 
 export interface FactoryStorePort {
+  enqueueArchitectureTask(payload: ArchitectureTaskRequest): Promise<ArchitectureTask>;
+  listArchitectureTasks(): Promise<ArchitectureTask[]>;
+  getArchitectureTask(taskId: string): Promise<ArchitectureTask | null>;
+  findArchitectureTaskBySpecId(specId: string): Promise<ArchitectureTask | null>;
+  leaseArchitectureTask(): Promise<ArchitectureTask | null>;
+  writeArchitectureTask(task: ArchitectureTask): Promise<void>;
+  writeArchitectureRun(run: ArchitectureRun): Promise<void>;
+  getArchitectureRun(runId: string): Promise<ArchitectureRun | null>;
+  writeArchitectureArtifact(artifact: ArchitectureArtifact): Promise<void>;
+  getArchitectureArtifact(runId: string): Promise<ArchitectureArtifact | null>;
   enqueueImplementationTask(payload: ImplementationTaskRequest): Promise<ImplementationTask>;
   listImplementationTasks(): Promise<ImplementationTask[]>;
   getImplementationTask(taskId: string): Promise<ImplementationTask | null>;
@@ -125,6 +164,7 @@ export type PipelineStep =
   | "refine"
   | "accept"
   | "veto"
+  | "architect"
   | "implement"
   | "verify"
   | "deploy"

@@ -62,6 +62,7 @@ test("factory core pipeline runs against non-artillery in-memory adapter", async
   await runPipelineStep(adapter, { step: "evaluate", specId: spec.specId });
   await runPipelineStep(adapter, { step: "refine", specId: spec.specId });
   await runPipelineStep(adapter, { step: "accept", specId: spec.specId });
+  await runPipelineStep(adapter, { step: "architect", specId: spec.specId });
   await runPipelineStep(adapter, { step: "implement", specId: spec.specId });
   await runPipelineStep(adapter, { step: "verify", specId: spec.specId });
   await runPipelineStep(adapter, { step: "deploy", specId: spec.specId, deployMode: "promote" });

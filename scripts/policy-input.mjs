@@ -141,6 +141,9 @@ async function collectWorkflowFacts(rootDir) {
     const specController = rel === ".github/workflows/spec-controller.yml"
       ? collectSpecControllerFacts(raw)
       : null;
+    const specArchitecture = rel === ".github/workflows/spec-architecture.yml"
+      ? collectSpecExecutionFacts(raw)
+      : null;
     const specExecution = rel === ".github/workflows/spec-execution.yml"
       ? collectSpecExecutionFacts(raw)
       : null;
@@ -153,6 +156,7 @@ async function collectWorkflowFacts(rootDir) {
       usesProdSecret,
       usesEnvironmentProd,
       specController,
+      specArchitecture,
       specExecution
     });
   }
@@ -161,7 +165,7 @@ async function collectWorkflowFacts(rootDir) {
 }
 
 function collectSpecExecutionFacts(raw) {
-  const executeBlock = extractJobBlock(raw, "execute");
+  const executeBlock = extractJobBlock(raw, "execute") || extractJobBlock(raw, "architect");
 
   return {
     hasPermissions:

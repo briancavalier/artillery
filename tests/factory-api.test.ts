@@ -160,6 +160,56 @@ test("factory store ingests CloudEvents and reports centralized admin status", a
     const storedArtifact = await store.getImplementationArtifact("run-1");
     assert.equal(storedRun?.provider, "dummy");
     assert.equal(storedArtifact?.prNumber, 7);
+
+    const architectureTask = await store.enqueueArchitectureTask({
+      specId: "SPEC-API-1",
+      source: "human",
+      owner: "@maintainer",
+      repo: "owner/repo",
+      baseBranch: "main",
+      baseSha: "abc123",
+      targetBranch: "codex/architect-spec-api-1",
+      artifactRoot: "architecture/SPEC-API-1",
+      contextBundleRef: "reports/architecture-context/SPEC-API-1.md",
+      priority: 100,
+      limits: { maxDurationMs: 1000, maxCostUsd: 1 },
+      policy: { allowAutoMerge: true, blockedPaths: ["apps/artillery-game/**"] }
+    });
+    assert.equal(architectureTask.status, "queued");
+    const leasedArchitecture = await store.leaseArchitectureTask();
+    assert.equal(leasedArchitecture?.taskId, architectureTask.taskId);
+    assert.equal(leasedArchitecture?.status, "running");
+    await store.writeArchitectureRun({
+      runId: "arch-run-1",
+      taskId: architectureTask.taskId,
+      provider: "dummy-architect",
+      model: "dummy-model",
+      status: "completed",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      result: "pr_opened",
+      usage: { inputTokens: 1, outputTokens: 2, estimatedCostUsd: 0.01 }
+    });
+    await store.writeArchitectureArtifact({
+      runId: "arch-run-1",
+      taskId: architectureTask.taskId,
+      prNumber: 8,
+      prUrl: "https://example.test/pr/8",
+      branch: "codex/architect-spec-api-1",
+      commitSha: "c0ffee",
+      filesChanged: ["architecture/SPEC-API-1/README.md"],
+      summaryMd: "summary",
+      payload: {
+        readme: "Architecture summary",
+        integrationPoints: [{ path: "apps/artillery-game/src/shared/simulation.ts", role: "simulation", writeIntent: "edit", priority: 1 }],
+        invariants: ["Keep deterministic state hashing stable."],
+        scenarioTrace: [{ scenarioId: "SCN-API-1", filePaths: ["apps/artillery-game/src/shared/simulation.ts"], evidenceHooks: ["integration"] }]
+      }
+    });
+    const storedArchitectureRun = await store.getArchitectureRun("arch-run-1");
+    const storedArchitectureArtifact = await store.getArchitectureArtifact("arch-run-1");
+    assert.equal(storedArchitectureRun?.provider, "dummy-architect");
+    assert.equal(storedArchitectureArtifact?.prNumber, 8);
   } finally {
     delete process.env.FACTORY_EVENT_MODE;
     delete process.env.FACTORY_STATE_PATH;

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createTempWorkspace, readJson, writeJson } from "./helpers.js";
 import { createArtilleryAdapter } from "../packages/project-adapter-artillery/src/index.js";
 import { createFactoryStore } from "../apps/factory-api/src/storage.js";
@@ -138,14 +138,34 @@ function makeSpec(status: FeatureSpec["status"], scenarioIds: string[]): Feature
   };
 }
 
-test("execution controller enqueues and verifies supported approved specs", async () => {
+async function writeArchitectureArtifacts(workspace: string, specId: string, scenarioIds: string[]): Promise<void> {
+  const dir = join(workspace, "architecture", specId);
+  await mkdir(dir, { recursive: true });
+  await writeJson(join(dir, "integration-points.json"), [
+    { path: "apps/artillery-game/src/shared/simulation.ts", role: "simulation", writeIntent: "edit", priority: 1 },
+    { path: "tests/determinism.test.ts", role: "determinism coverage", writeIntent: "read-only", priority: 2 }
+  ]);
+  await writeJson(join(dir, "invariants.json"), [
+    "Keep deterministic state hashing stable.",
+    "Preserve required scenario evidence hooks."
+  ]);
+  await writeJson(join(dir, "scenario-trace.json"), scenarioIds.map((scenarioId) => ({
+    scenarioId,
+    filePaths: ["apps/artillery-game/src/shared/simulation.ts"],
+    evidenceHooks: ["integration"]
+  })));
+  await writeFile(join(dir, "README.md"), "# Architecture\n", "utf8");
+}
+
+test("execution controller enqueues and verifies supported architected specs", async () => {
   const workspace = await createTempWorkspace();
   process.env.FACTORY_EVENT_MODE = "local";
   process.env.FACTORY_STATE_PATH = join(workspace, "var/factory/state.json");
   process.env.IMPLEMENTATION_TEST_MODE = "1";
 
   try {
-    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Approved", ["SCN-0001", "SCN-0002", "SCN-0003"]));
+    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Architected", ["SCN-0001", "SCN-0002", "SCN-0003"]));
+    await writeArchitectureArtifacts(workspace, "SPEC-EXEC-1", ["SCN-0001", "SCN-0002", "SCN-0003"]);
     const adapter = createArtilleryAdapter({
       specDir: join(workspace, "specs"),
       evidenceDir: join(workspace, "evidence"),
@@ -193,7 +213,7 @@ test("execution controller enqueues and verifies supported approved specs", asyn
   }
 });
 
-test("execution controller blocks artifacts outside implementation allowlist", async () => {
+test("execution controller skips approved specs until architecture artifacts exist", async () => {
   const workspace = await createTempWorkspace();
   process.env.FACTORY_EVENT_MODE = "local";
   process.env.FACTORY_STATE_PATH = join(workspace, "var/factory/state.json");
@@ -201,6 +221,46 @@ test("execution controller blocks artifacts outside implementation allowlist", a
 
   try {
     await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Approved", ["SCN-0001"]));
+    const adapter = createArtilleryAdapter({
+      specDir: join(workspace, "specs"),
+      evidenceDir: join(workspace, "evidence"),
+      ledgerPath: join(workspace, "var/ledger/events.ndjson"),
+      evaluationsDir: join(workspace, "reports/evaluations"),
+      canaryPath: join(workspace, "ops/canary/latest.json"),
+      dryRun: false,
+      localEventMode: true
+    } as never);
+    const store = await createFactoryStore();
+
+    const result = await runSpecExecution({
+      adapter,
+      store,
+      provider: new DummyProvider(["apps/artillery-game/src/shared/simulation.ts"]),
+      owner: "owner",
+      repo: "repo",
+      baseBranch: "main",
+      commitSha: "base-sha",
+      reportRootDir: workspace
+    });
+
+    assert.equal(result.manifest.queued.length, 0);
+    assert.equal(result.manifest.advanced.length, 0);
+  } finally {
+    delete process.env.FACTORY_EVENT_MODE;
+    delete process.env.FACTORY_STATE_PATH;
+    delete process.env.IMPLEMENTATION_TEST_MODE;
+  }
+});
+
+test("execution controller blocks artifacts outside implementation allowlist", async () => {
+  const workspace = await createTempWorkspace();
+  process.env.FACTORY_EVENT_MODE = "local";
+  process.env.FACTORY_STATE_PATH = join(workspace, "var/factory/state.json");
+  process.env.IMPLEMENTATION_TEST_MODE = "1";
+
+  try {
+    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Architected", ["SCN-0001"]));
+    await writeArchitectureArtifacts(workspace, "SPEC-EXEC-1", ["SCN-0001"]);
     const adapter = createArtilleryAdapter({
       specDir: join(workspace, "specs"),
       evidenceDir: join(workspace, "evidence"),
@@ -225,7 +285,7 @@ test("execution controller blocks artifacts outside implementation allowlist", a
 
     assert.equal(result.manifest.advanced[0]?.taskStatus, "blocked");
     const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
-    assert.equal(stored.status, "Approved");
+    assert.equal(stored.status, "Architected");
   } finally {
     delete process.env.FACTORY_EVENT_MODE;
     delete process.env.FACTORY_STATE_PATH;
@@ -240,7 +300,8 @@ test("execution controller does not merge when required evidence fails", async (
   process.env.IMPLEMENTATION_TEST_MODE = "1";
 
   try {
-    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Approved", ["SCN-0301", "SCN-0302"]));
+    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Architected", ["SCN-0301", "SCN-0302"]));
+    await writeArchitectureArtifacts(workspace, "SPEC-EXEC-1", ["SCN-0301", "SCN-0302"]);
     const adapter = createArtilleryAdapter({
       specDir: join(workspace, "specs"),
       evidenceDir: join(workspace, "evidence"),
@@ -271,7 +332,7 @@ test("execution controller does not merge when required evidence fails", async (
       "tests/determinism.test.ts"
     ]);
     const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
-    assert.equal(stored.status, "Approved");
+    assert.equal(stored.status, "Architected");
   } finally {
     delete process.env.FACTORY_EVENT_MODE;
     delete process.env.FACTORY_STATE_PATH;
@@ -286,7 +347,8 @@ test("execution controller surfaces provider failure diagnostics in the manifest
   process.env.IMPLEMENTATION_TEST_MODE = "1";
 
   try {
-    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Approved", ["SCN-0001"]));
+    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Architected", ["SCN-0001"]));
+    await writeArchitectureArtifacts(workspace, "SPEC-EXEC-1", ["SCN-0001"]);
     const adapter = createArtilleryAdapter({
       specDir: join(workspace, "specs"),
       evidenceDir: join(workspace, "evidence"),
@@ -316,7 +378,7 @@ test("execution controller surfaces provider failure diagnostics in the manifest
     assert.equal(result.manifest.advanced[0]?.failureReason, "synthetic provider failure (artifact missing)");
     assert.equal(result.manifest.advanced[0]?.runSummary, "synthetic provider failure");
     const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
-    assert.equal(stored.status, "Approved");
+    assert.equal(stored.status, "Architected");
   } finally {
     delete process.env.FACTORY_EVENT_MODE;
     delete process.env.FACTORY_STATE_PATH;

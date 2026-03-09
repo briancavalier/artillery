@@ -8,13 +8,16 @@ import {
   summarizeProjectHealth,
   verifyScenario,
   type AgentQualityStatus,
+  type ArchitectureArtifact,
+  type ArchitectureRun,
+  type ArchitectureTask,
+  type ArchitectureTaskRequest,
   type CloudEventEnvelope,
   type FactoryAdminStatus,
   type FactoryEventsQuery,
   type ImplementationArtifact,
   type ImplementationRun,
   type ImplementationTask,
-  type ImplementationTaskListResponse,
   type ImplementationTaskRequest,
   type ProjectCanaryResponse,
   type ProjectHealthResponse,
@@ -36,6 +39,9 @@ export interface FactoryStore extends FactoryStorePort {
 
 interface FileState {
   events: Array<CloudEventEnvelope<Record<string, unknown>>>;
+  architectureTasks: ArchitectureTask[];
+  architectureRuns: ArchitectureRun[];
+  architectureArtifacts: ArchitectureArtifact[];
   implementationTasks: ImplementationTask[];
   implementationRuns: ImplementationRun[];
   implementationArtifacts: ImplementationArtifact[];
@@ -83,7 +89,7 @@ class FileFactoryStore implements FactoryStore {
 
   async getFactoryStatus(): Promise<FactoryAdminStatus> {
     const state = await this.read();
-    return summarizeFactory(state.events, state.implementationTasks);
+    return summarizeFactory(state.events, state.architectureTasks, state.implementationTasks);
   }
 
   async getAgentStatus(): Promise<AgentQualityStatus> {
@@ -141,6 +147,113 @@ class FileFactoryStore implements FactoryStore {
     state.implementationTasks.push(task);
     await this.write(state);
     return task;
+  }
+
+  async enqueueArchitectureTask(payload: ArchitectureTaskRequest): Promise<ArchitectureTask> {
+    const state = await this.read();
+    const task: ArchitectureTask = {
+      taskId: randomUUID(),
+      specId: payload.specId,
+      source: payload.source,
+      owner: payload.owner,
+      repo: payload.repo,
+      baseBranch: payload.baseBranch,
+      baseSha: payload.baseSha,
+      targetBranch: payload.targetBranch,
+      artifactRoot: payload.artifactRoot,
+      contextBundleRef: payload.contextBundleRef,
+      attempt: 0,
+      priority: payload.priority,
+      limits: payload.limits,
+      policy: payload.policy,
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    state.architectureTasks.push(task);
+    await this.write(state);
+    return task;
+  }
+
+  async listArchitectureTasks(): Promise<ArchitectureTask[]> {
+    const state = await this.read();
+    return [...state.architectureTasks].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async getArchitectureTask(taskId: string): Promise<ArchitectureTask | null> {
+    const state = await this.read();
+    return state.architectureTasks.find((task) => task.taskId === taskId) ?? null;
+  }
+
+  async findArchitectureTaskBySpecId(specId: string): Promise<ArchitectureTask | null> {
+    const state = await this.read();
+    return [...state.architectureTasks]
+      .filter((task) => task.specId === specId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+  }
+
+  async leaseArchitectureTask(): Promise<ArchitectureTask | null> {
+    const state = await this.read();
+    const task = state.architectureTasks
+      .filter((entry) => entry.status === "queued")
+      .sort((a, b) => {
+        if (a.priority !== b.priority) {
+          return b.priority - a.priority;
+        }
+        return a.createdAt.localeCompare(b.createdAt);
+      })[0];
+
+    if (!task) {
+      return null;
+    }
+
+    task.status = "running";
+    task.updatedAt = new Date().toISOString();
+    await this.write(state);
+    return structuredClone(task);
+  }
+
+  async writeArchitectureTask(task: ArchitectureTask): Promise<void> {
+    const state = await this.read();
+    const index = state.architectureTasks.findIndex((entry) => entry.taskId === task.taskId);
+    if (index >= 0) {
+      state.architectureTasks[index] = structuredClone(task);
+    } else {
+      state.architectureTasks.push(structuredClone(task));
+    }
+    await this.write(state);
+  }
+
+  async writeArchitectureRun(run: ArchitectureRun): Promise<void> {
+    const state = await this.read();
+    const index = state.architectureRuns.findIndex((entry) => entry.runId === run.runId);
+    if (index >= 0) {
+      state.architectureRuns[index] = structuredClone(run);
+    } else {
+      state.architectureRuns.push(structuredClone(run));
+    }
+    await this.write(state);
+  }
+
+  async getArchitectureRun(runId: string): Promise<ArchitectureRun | null> {
+    const state = await this.read();
+    return state.architectureRuns.find((run) => run.runId === runId) ?? null;
+  }
+
+  async writeArchitectureArtifact(artifact: ArchitectureArtifact): Promise<void> {
+    const state = await this.read();
+    const index = state.architectureArtifacts.findIndex((entry) => entry.runId === artifact.runId);
+    if (index >= 0) {
+      state.architectureArtifacts[index] = structuredClone(artifact);
+    } else {
+      state.architectureArtifacts.push(structuredClone(artifact));
+    }
+    await this.write(state);
+  }
+
+  async getArchitectureArtifact(runId: string): Promise<ArchitectureArtifact | null> {
+    const state = await this.read();
+    return state.architectureArtifacts.find((artifact) => artifact.runId === runId) ?? null;
   }
 
   async listImplementationTasks(): Promise<ImplementationTask[]> {
@@ -229,6 +342,9 @@ class FileFactoryStore implements FactoryStore {
     const parsed = JSON.parse(raw) as Partial<FileState>;
     return {
       events: parsed.events ?? [],
+      architectureTasks: parsed.architectureTasks ?? [],
+      architectureRuns: parsed.architectureRuns ?? [],
+      architectureArtifacts: parsed.architectureArtifacts ?? [],
       implementationTasks: parsed.implementationTasks ?? [],
       implementationRuns: parsed.implementationRuns ?? [],
       implementationArtifacts: parsed.implementationArtifacts ?? []
@@ -255,6 +371,31 @@ class PostgresFactoryStore implements FactoryStore {
         event_type TEXT NOT NULL,
         event_time TIMESTAMPTZ NOT NULL,
         source TEXT NOT NULL,
+        payload JSONB NOT NULL
+      )
+    `);
+    await this.client.query(`
+      CREATE TABLE IF NOT EXISTS architecture_tasks (
+        id TEXT PRIMARY KEY,
+        spec_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL,
+        payload JSONB NOT NULL
+      )
+    `);
+    await this.client.query(`
+      CREATE TABLE IF NOT EXISTS architecture_runs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL,
+        payload JSONB NOT NULL
+      )
+    `);
+    await this.client.query(`
+      CREATE TABLE IF NOT EXISTS architecture_artifacts (
+        run_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
         payload JSONB NOT NULL
       )
     `);
@@ -340,11 +481,12 @@ class PostgresFactoryStore implements FactoryStore {
   }
 
   async getFactoryStatus(): Promise<FactoryAdminStatus> {
-    const [events, tasks] = await Promise.all([
+    const [events, architectureTasks, implementationTasks] = await Promise.all([
       this.getEvents({ limit: 5000, order: "desc" }),
+      this.listArchitectureTasks(),
       this.listImplementationTasks()
     ]);
-    return summarizeFactory(events, tasks);
+    return summarizeFactory(events, architectureTasks, implementationTasks);
   }
 
   async getAgentStatus(): Promise<AgentQualityStatus> {
@@ -400,6 +542,104 @@ class PostgresFactoryStore implements FactoryStore {
     };
     await this.writeImplementationTask(task);
     return task;
+  }
+
+  async enqueueArchitectureTask(payload: ArchitectureTaskRequest): Promise<ArchitectureTask> {
+    const task: ArchitectureTask = {
+      taskId: randomUUID(),
+      specId: payload.specId,
+      source: payload.source,
+      owner: payload.owner,
+      repo: payload.repo,
+      baseBranch: payload.baseBranch,
+      baseSha: payload.baseSha,
+      targetBranch: payload.targetBranch,
+      artifactRoot: payload.artifactRoot,
+      contextBundleRef: payload.contextBundleRef,
+      attempt: 0,
+      priority: payload.priority,
+      limits: payload.limits,
+      policy: payload.policy,
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await this.writeArchitectureTask(task);
+    return task;
+  }
+
+  async listArchitectureTasks(): Promise<ArchitectureTask[]> {
+    const result = await this.client.query(
+      `SELECT payload FROM architecture_tasks ORDER BY updated_at DESC LIMIT 500`
+    );
+    return result.rows.map((row: { payload: ArchitectureTask }) => row.payload);
+  }
+
+  async getArchitectureTask(taskId: string): Promise<ArchitectureTask | null> {
+    const result = await this.client.query(
+      `SELECT payload FROM architecture_tasks WHERE id = $1 LIMIT 1`,
+      [taskId]
+    );
+    return (result.rows[0]?.payload as ArchitectureTask | undefined) ?? null;
+  }
+
+  async findArchitectureTaskBySpecId(specId: string): Promise<ArchitectureTask | null> {
+    const result = await this.client.query(
+      `SELECT payload FROM architecture_tasks WHERE spec_id = $1 ORDER BY updated_at DESC LIMIT 1`,
+      [specId]
+    );
+    return (result.rows[0]?.payload as ArchitectureTask | undefined) ?? null;
+  }
+
+  async leaseArchitectureTask(): Promise<ArchitectureTask | null> {
+    const result = await this.client.query(
+      `SELECT payload FROM architecture_tasks WHERE status = 'queued' ORDER BY updated_at ASC LIMIT 1`
+    );
+    const task = result.rows[0]?.payload as ArchitectureTask | undefined;
+    if (!task) {
+      return null;
+    }
+    task.status = "running";
+    task.updatedAt = new Date().toISOString();
+    await this.writeArchitectureTask(task);
+    return task;
+  }
+
+  async writeArchitectureTask(task: ArchitectureTask): Promise<void> {
+    await this.client.query(
+      `INSERT INTO architecture_tasks (id, spec_id, status, updated_at, payload)
+       VALUES ($1, $2, $3, $4::timestamptz, $5::jsonb)
+       ON CONFLICT (id) DO UPDATE SET spec_id = EXCLUDED.spec_id, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at, payload = EXCLUDED.payload`,
+      [task.taskId, task.specId, task.status, task.updatedAt, JSON.stringify(task)]
+    );
+  }
+
+  async writeArchitectureRun(run: ArchitectureRun): Promise<void> {
+    await this.client.query(
+      `INSERT INTO architecture_runs (id, task_id, status, updated_at, payload)
+       VALUES ($1, $2, $3, $4::timestamptz, $5::jsonb)
+       ON CONFLICT (id) DO UPDATE SET task_id = EXCLUDED.task_id, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at, payload = EXCLUDED.payload`,
+      [run.runId, run.taskId, run.status, run.finishedAt ?? run.startedAt, JSON.stringify(run)]
+    );
+  }
+
+  async getArchitectureRun(runId: string): Promise<ArchitectureRun | null> {
+    const result = await this.client.query(`SELECT payload FROM architecture_runs WHERE id = $1 LIMIT 1`, [runId]);
+    return (result.rows[0]?.payload as ArchitectureRun | undefined) ?? null;
+  }
+
+  async writeArchitectureArtifact(artifact: ArchitectureArtifact): Promise<void> {
+    await this.client.query(
+      `INSERT INTO architecture_artifacts (run_id, task_id, payload)
+       VALUES ($1, $2, $3::jsonb)
+       ON CONFLICT (run_id) DO UPDATE SET task_id = EXCLUDED.task_id, payload = EXCLUDED.payload`,
+      [artifact.runId, artifact.taskId, JSON.stringify(artifact)]
+    );
+  }
+
+  async getArchitectureArtifact(runId: string): Promise<ArchitectureArtifact | null> {
+    const result = await this.client.query(`SELECT payload FROM architecture_artifacts WHERE run_id = $1 LIMIT 1`, [runId]);
+    return (result.rows[0]?.payload as ArchitectureArtifact | undefined) ?? null;
   }
 
   async listImplementationTasks(): Promise<ImplementationTask[]> {
@@ -479,6 +719,7 @@ class PostgresFactoryStore implements FactoryStore {
 
 function summarizeFactory(
   events: Array<CloudEventEnvelope<Record<string, unknown>>>,
+  architectureTasks: ArchitectureTask[],
   implementationTasks: ImplementationTask[]
 ): FactoryAdminStatus {
   const gateFailures = count(events, "pipeline_event", "gate_failed");
@@ -497,6 +738,9 @@ function summarizeFactory(
       gateFailures,
       deploymentsToday: deployments,
       rollbacksToday: rollbacks,
+      architectureQueueDepth: architectureTasks.filter((task) => ["queued", "running"].includes(task.status)).length,
+      architectureMergedToday: architectureTasks.filter((task) => task.status === "merged").length,
+      architectureBlockedToday: architectureTasks.filter((task) => task.status === "blocked").length,
       implementationQueueDepth: implementationTasks.filter((task) => ["queued", "running", "merge_ready"].includes(task.status)).length,
       implementationMergedToday: implementationTasks.filter((task) => task.status === "merged").length,
       implementationBlockedToday: implementationTasks.filter((task) => task.status === "blocked").length
@@ -569,6 +813,9 @@ function filterEvents(
 function emptyState(): FileState {
   return {
     events: [],
+    architectureTasks: [],
+    architectureRuns: [],
+    architectureArtifacts: [],
     implementationTasks: [],
     implementationRuns: [],
     implementationArtifacts: []

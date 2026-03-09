@@ -19,11 +19,13 @@
    - `factory/veto` (requires comment `/factory-reason SPEC-xxxx: ...`)
    - `factory/rollback` (requires comment `/factory-reason SPEC-xxxx: ...`)
 7. Merge accepted spec PRs to `main`.
-8. `spec-execution.yml` enqueues accepted `Approved` specs into the factory implementation queue.
-9. The factory API worker builds project-scoped implementation context, invokes the Codex provider, and opens or updates draft PRs on `codex/implement-<spec-id>`.
-10. The worker runs local checks plus adapter-backed evidence generation and only auto-merges when evidence, CI, policy, and branch protection gates pass.
-11. Blocked or failed runs remain open as PRs with recorded task state; maintainers can retry or cancel through factory admin APIs.
-12. `autonomous-deploy.yml` promotes verified specs through staging and production.
+8. `spec-architecture.yml` enqueues accepted `Approved` specs into the factory architecture queue.
+9. The factory API worker builds architecture context, invokes the Codex architect provider, and opens or updates draft PRs on `codex/architect-<spec-id>`.
+10. Architecture PRs auto-merge only when they touch artifact paths only and CI/policy checks pass. Merged specs advance to `Architected`.
+11. `spec-execution.yml` enqueues accepted `Architected` specs into the factory implementation queue.
+12. The implementation worker consumes architecture artifacts plus supplemental repo discovery, opens or updates draft PRs on `codex/implement-<spec-id>`, and only auto-merges when evidence, CI, policy, and branch protection gates pass.
+13. Blocked or failed runs remain open as PRs with recorded task state; maintainers can retry or cancel through factory admin APIs.
+14. `autonomous-deploy.yml` promotes verified specs through staging and production.
 
 Centralized events:
 
@@ -32,7 +34,9 @@ Centralized events:
 
 ## Cloud Autonomous Flow
 
-- Accepted specs merged to `main` trigger `spec-execution.yml`.
+- Accepted specs merged to `main` trigger `spec-architecture.yml`.
+- Architecture tasks publish repo-tracked artifacts and advance specs to `Architected`.
+- `Architected` specs trigger `spec-execution.yml`.
 - Spec execution enqueues implementation tasks in factory storage and emits implementation telemetry.
 - The Codex worker opens or reuses draft implementation PRs for pending code work.
 - The worker writes evidence files, merges passing PRs, and then advances specs through `Implemented` and `Verified`.

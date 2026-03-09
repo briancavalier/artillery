@@ -32,7 +32,7 @@ export async function enqueueAcceptedSpecs(
   const specs = await adapter.listSpecs();
   const queued: ImplementationTask[] = [];
   for (const record of specs) {
-    if (record.data.status !== "Approved" || record.data.decision !== "accept") {
+    if (record.data.status !== "Architected" || record.data.decision !== "accept") {
       continue;
     }
 
@@ -47,6 +47,14 @@ export async function enqueueAcceptedSpecs(
       maxFilesChanged: 24
     };
     const context = await adapter.buildImplementationContext?.(record.data.specId);
+    const architectureArtifactPresent = context?.relevantFiles.some((path) => path.startsWith(`architecture/${record.data.specId}/`)) ?? false;
+    if (!architectureArtifactPresent) {
+      await emit(adapter, options, "gate_failed", record.data.specId, record.data.scenarios[0]?.id ?? "SCN-UNBOUND", {
+        gate: "architect",
+        reason: `Missing architecture artifacts for ${record.data.specId}`
+      });
+      continue;
+    }
     const contextBundleRef = await writeContextBundle(options.reportRootDir ?? process.cwd(), record.data, context);
 
     const task = await store.enqueueImplementationTask({
@@ -117,6 +125,7 @@ export async function processImplementationQueue(
       task.provider = run.provider;
       task.model = run.model;
       await store.writeImplementationRun(run);
+      await emitProviderDiagnostics(adapter, options, task, run);
 
       const artifact = await provider.collectArtifacts(run.runId);
       if (artifact) {
@@ -550,6 +559,42 @@ async function emit(
     }
   };
   await adapter.appendEvent(event);
+}
+
+async function emitProviderDiagnostics(
+  adapter: FactoryAdapter,
+  options: SpecExecutionOptions,
+  task: ImplementationTask,
+  run: ImplementationRun
+): Promise<void> {
+  const requestDiagnostics = run.metadata?.requestDiagnostics as { attempts?: Array<Record<string, unknown>> } | undefined;
+  if (!requestDiagnostics?.attempts?.length) {
+    return;
+  }
+  const attempts = requestDiagnostics.attempts;
+  for (const attempt of attempts.slice(0, -1)) {
+    await emit(adapter, options, "provider_request_retry", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+      taskId: task.taskId,
+      runId: run.runId,
+      provider: run.provider,
+      model: run.model,
+      attempt
+    });
+  }
+  await emit(
+    adapter,
+    options,
+    run.status === "failed" ? "provider_request_failed" : "provider_request_succeeded",
+    task.specId,
+    task.verificationTargets[0] ?? "SCN-UNBOUND",
+    {
+      taskId: task.taskId,
+      runId: run.runId,
+      provider: run.provider,
+      model: run.model,
+      diagnostics: requestDiagnostics
+    }
+  );
 }
 
 function validateArtifact(task: ImplementationTask, artifact: ImplementationArtifact): { ok: true } | { ok: false; reason: string } {

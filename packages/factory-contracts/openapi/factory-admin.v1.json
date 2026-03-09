@@ -82,6 +82,70 @@
         }
       }
     },
+    "/v1/admin/architecture/tasks": {
+      "post": {
+        "summary": "Queue an architecture task",
+        "operationId": "enqueueArchitectureTask",
+        "responses": {
+          "200": {
+            "description": "Queued architecture task"
+          }
+        }
+      },
+      "get": {
+        "summary": "List architecture tasks",
+        "operationId": "listArchitectureTasks",
+        "responses": {
+          "200": {
+            "description": "Architecture task list"
+          }
+        }
+      }
+    },
+    "/v1/admin/architecture/tasks/{taskId}": {
+      "get": {
+        "summary": "Get architecture task",
+        "operationId": "getArchitectureTask",
+        "responses": {
+          "200": {
+            "description": "Architecture task"
+          }
+        }
+      }
+    },
+    "/v1/admin/architecture/tasks/{taskId}/cancel": {
+      "post": {
+        "summary": "Cancel architecture task",
+        "operationId": "cancelArchitectureTask",
+        "responses": {
+          "200": {
+            "description": "Canceled architecture task"
+          }
+        }
+      }
+    },
+    "/v1/admin/architecture/tasks/{taskId}/retry": {
+      "post": {
+        "summary": "Retry architecture task",
+        "operationId": "retryArchitectureTask",
+        "responses": {
+          "200": {
+            "description": "Retried architecture task"
+          }
+        }
+      }
+    },
+    "/v1/admin/architecture/runs/{runId}": {
+      "get": {
+        "summary": "Get architecture run",
+        "operationId": "getArchitectureRun",
+        "responses": {
+          "200": {
+            "description": "Architecture run"
+          }
+        }
+      }
+    },
     "/v1/admin/implementation/tasks": {
       "post": {
         "summary": "Queue an implementation task",

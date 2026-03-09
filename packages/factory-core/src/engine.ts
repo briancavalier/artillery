@@ -14,6 +14,7 @@ const PIPELINE_ORDER: SpecStatus[] = [
   "Critiqued",
   "Refined",
   "Approved",
+  "Architected",
   "Implemented",
   "Verified",
   "Deployed"
@@ -37,6 +38,9 @@ export async function runPipelineStep(adapter: FactoryAdapter, options: RunOptio
       return;
     case "veto":
       await veto(adapter, options);
+      return;
+    case "architect":
+      await architect(adapter, options);
       return;
     case "implement":
       await implement(adapter, options);
@@ -256,8 +260,23 @@ async function veto(adapter: FactoryAdapter, options: RunOptions): Promise<void>
   });
 }
 
+async function architect(adapter: FactoryAdapter, options: RunOptions): Promise<void> {
+  const specs = await selectSpecs(adapter, ["Approved", "Architected"], options.specId);
+  for (const record of specs) {
+    if (record.data.decision !== "accept") {
+      continue;
+    }
+
+    await updateStatus(adapter, record, "Architected");
+    await emit(adapter, options, "pipeline_event", "spec_architected", {
+      specId: record.data.specId,
+      scenarioId: firstScenario(record.data)
+    });
+  }
+}
+
 async function implement(adapter: FactoryAdapter, options: RunOptions): Promise<void> {
-  const specs = await selectSpecs(adapter, ["Approved"], options.specId);
+  const specs = await selectSpecs(adapter, ["Architected"], options.specId);
   for (const record of specs) {
     if (record.data.decision !== "accept") {
       continue;

@@ -134,6 +134,34 @@ deny[msg] if {
 }
 
 deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-architecture.yml"
+  not workflow.specArchitecture.hasPermissions
+  msg := "spec-architecture workflow missing required permissions"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-architecture.yml"
+  not workflow.specArchitecture.hasAttestationPermission
+  msg := "spec-architecture workflow missing attestations: write permission"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-architecture.yml"
+  workflow.specArchitecture.usesProdSecret
+  msg := "spec-architecture workflow must not reference production secrets"
+}
+
+deny[msg] if {
+  workflow := input.workflows[_]
+  workflow.file == ".github/workflows/spec-architecture.yml"
+  workflow.specArchitecture.usesProductionEnvironment
+  msg := "spec-architecture workflow must not reference production environment"
+}
+
+deny[msg] if {
   issue := input.contracts.issues[_]
   msg := sprintf("contract issue: %s", [issue])
 }

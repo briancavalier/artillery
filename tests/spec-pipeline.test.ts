@@ -75,6 +75,7 @@ test("maintainer controls enforce accept, veto, verify, deploy, rollback", async
   await runScript(FACTORY_SCRIPT, ["evaluate"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, SPEC_ID: "SPEC-H-002", FACTORY_EVENT_MODE: "local" } });
   await runScript(FACTORY_SCRIPT, ["refine"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, SPEC_ID: "SPEC-H-002", FACTORY_EVENT_MODE: "local" } });
   await runScript(FACTORY_SCRIPT, ["accept", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, FACTORY_EVENT_MODE: "local" } });
+  await runScript(FACTORY_SCRIPT, ["architect", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, FACTORY_EVENT_MODE: "local" } });
   await runScript(FACTORY_SCRIPT, ["implement", "SPEC-H-002"], { cwd: workspace, env: { SPEC_DIR: join(workspace, "specs"), LEDGER_PATH: ledgerPath, FACTORY_EVENT_MODE: "local" } });
 
   await mkdir(join(workspace, "evidence/SPEC-H-002"), { recursive: true });

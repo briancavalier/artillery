@@ -15,6 +15,7 @@ import type {
 } from "@darkfactory/contracts";
 import type { ImplementationContext, ImplementationProvider } from "@darkfactory/core";
 import { GitHubAutomationApi } from "./github.js";
+import { OpenAiRequestError, type OpenAiRequestDiagnostics, requestOpenAiText } from "./openai.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,6 +37,7 @@ interface ParsedCodexResponse {
   rawText: string;
   summary: string;
   patch: string;
+  diagnostics: OpenAiRequestDiagnostics;
   usage: {
     inputTokens: number;
     outputTokens: number;
@@ -312,6 +314,7 @@ export class CodexImplementationProvider implements ImplementationProvider {
           ...(run.metadata ?? {}),
           branch,
           responseId: parsed.responseId,
+          requestDiagnostics: parsed.diagnostics,
           attempts
         }
       };
@@ -338,6 +341,8 @@ export class CodexImplementationProvider implements ImplementationProvider {
           ...(run.metadata ?? {}),
           branch,
           phase: "provider_execution",
+          failureClass: error instanceof OpenAiRequestError ? error.diagnostics.finalFailureClass : undefined,
+          requestDiagnostics: error instanceof OpenAiRequestError ? error.diagnostics : undefined,
           errorName: error instanceof Error ? error.name : "Error",
           stack: error instanceof Error ? error.stack : undefined
         }
@@ -456,7 +461,9 @@ async function discoverImplementationContext(
 ): Promise<DiscoveryOutcome> {
   const parsedContext = parseContextBundleMetadata(contextText);
   const readPaths = parsedContext?.context?.readPaths?.length ? parsedContext.context.readPaths : ["**"];
+  const architectureHints = await readArchitectureHints(worktreePath, task.specId, parsedContext);
   const seedFiles = uniquePaths([
+    ...architectureHints.integrationPoints,
     ...(parsedContext?.context?.seedFiles ?? []),
     ...(parsedContext?.context?.relevantFiles ?? [])
   ]);
@@ -467,7 +474,17 @@ async function discoverImplementationContext(
   const keywords = extractDiscoveryKeywords(parsedContext);
   const contentMatches = await searchFilesByKeyword(worktreePath, keywords);
   const candidates = scoreDiscoveryCandidates(repoFiles, seedFiles, contentMatches, keywords);
-  const selection = await selectContextFiles(worktreePath, candidates, discoveryBudget);
+  const mandatoryFiles = uniquePaths([
+    ...architectureHints.artifactFiles,
+    ...architectureHints.integrationPoints
+  ]);
+  const selection = await selectContextFiles(
+    worktreePath,
+    candidates,
+    discoveryBudget,
+    mandatoryFiles,
+    architectureHints.integrationPoints.length > 0 ? 12 : undefined
+  );
 
   if (selection.selectedFiles.length === 0) {
     const blockedReason = `Blocked: Discovery could not identify plausible integration points for ${task.specId} within the configured read budget.`;
@@ -747,7 +764,9 @@ function scoreDiscoveryCandidates(
 async function selectContextFiles(
   worktreePath: string,
   candidates: FileCandidate[],
-  discoveryBudget: ImplementationDiscoveryBudget
+  discoveryBudget: ImplementationDiscoveryBudget,
+  mandatoryFiles: string[] = [],
+  maxSupplementalFiles?: number
 ): Promise<{
   readFiles: string[];
   selectedFiles: string[];
@@ -760,9 +779,50 @@ async function selectContextFiles(
   const selectedFiles: string[] = [];
   const snapshots: string[] = [];
   let bytes = 0;
+  let supplementalCount = 0;
+  const mandatorySet = new Set(mandatoryFiles);
+
+  for (const mandatoryPath of mandatoryFiles) {
+    const candidate = candidates.find((entry) => entry.path === mandatoryPath) ?? {
+      path: mandatoryPath,
+      score: 999,
+      reasons: ["architecture-selected file"]
+    };
+    try {
+      const contents = await readFile(join(worktreePath, candidate.path), "utf8");
+      const contentBytes = Buffer.byteLength(contents);
+      readFiles.push(candidate.path);
+      if (selectedFiles.length >= discoveryBudget.maxFiles) {
+        break;
+      }
+      if (bytes + contentBytes > discoveryBudget.maxBytes && selectedFiles.length > 0) {
+        continue;
+      }
+      if (!selectedFiles.includes(candidate.path)) {
+        selectedFiles.push(candidate.path);
+        selectionReasons[candidate.path] = candidate.reasons.join("; ") || "selected by architecture";
+        bytes += contentBytes;
+        snapshots.push([
+          `FILE: ${candidate.path}`,
+          `REASON: ${selectionReasons[candidate.path]}`,
+          "```",
+          truncate(contents, 8000),
+          "```"
+        ].join("\n"));
+      }
+    } catch {
+      continue;
+    }
+  }
 
   for (const candidate of candidates) {
     if (selectedFiles.length >= discoveryBudget.maxFiles) {
+      break;
+    }
+    if (mandatorySet.has(candidate.path)) {
+      continue;
+    }
+    if (maxSupplementalFiles !== undefined && supplementalCount >= maxSupplementalFiles) {
       break;
     }
 
@@ -777,6 +837,7 @@ async function selectContextFiles(
       selectedFiles.push(candidate.path);
       selectionReasons[candidate.path] = candidate.reasons.join("; ") || "selected by discovery";
       bytes += contentBytes;
+      supplementalCount += 1;
       snapshots.push([
         `FILE: ${candidate.path}`,
         `REASON: ${selectionReasons[candidate.path]}`,
@@ -801,6 +862,29 @@ async function selectContextFiles(
   };
 }
 
+async function readArchitectureHints(
+  worktreePath: string,
+  specId: string,
+  parsedContext: ParsedContextBundle | null
+): Promise<{ artifactFiles: string[]; integrationPoints: string[] }> {
+  const artifactRoot = `architecture/${specId}`;
+  const artifactFiles = (parsedContext?.context?.relevantFiles ?? []).filter((path) => path.startsWith(`${artifactRoot}/`));
+  const integrationFile = artifactFiles.find((path) => path.endsWith("/integration-points.json"));
+  if (!integrationFile) {
+    return { artifactFiles, integrationPoints: [] };
+  }
+
+  try {
+    const payload = JSON.parse(await readFile(join(worktreePath, integrationFile), "utf8")) as Array<{ path: string }>;
+    return {
+      artifactFiles,
+      integrationPoints: uniquePaths(payload.map((entry) => entry.path))
+    };
+  } catch {
+    return { artifactFiles, integrationPoints: [] };
+  }
+}
+
 function renderDiscoveredContext(snapshots: string[], discoveryGoals: string[]): string {
   return [
     "## Discovery Goals",
@@ -816,38 +900,25 @@ function uniquePaths(paths: string[]): string[] {
 }
 
 async function requestCodexResponse(apiKey: string, task: ImplementationTask, branch: string, prompt: string): Promise<ParsedCodexResponse> {
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_MODEL ?? "gpt-5-codex",
-      input: [
-        {
-          role: "system",
-          content: [{ type: "input_text", text: SYSTEM_PROMPT }]
-        },
-        {
-          role: "user",
-          content: [{ type: "input_text", text: prompt }]
-        }
-      ],
-      text: { format: { type: "text" } },
-      metadata: {
-        specId: task.specId,
-        taskId: task.taskId,
-        branch
+  const { payload, diagnostics } = await requestOpenAiText(apiKey, {
+    model: process.env.OPENAI_MODEL ?? "gpt-5-codex",
+    input: [
+      {
+        role: "system",
+        content: [{ type: "input_text", text: SYSTEM_PROMPT }]
+      },
+      {
+        role: "user",
+        content: [{ type: "input_text", text: prompt }]
       }
-    })
+    ],
+    text: { format: { type: "text" } },
+    metadata: {
+      specId: task.specId,
+      taskId: task.taskId,
+      branch
+    }
   });
-
-  if (!response.ok) {
-    throw new Error(`OpenAI Responses API failed: ${response.status} ${(await response.text()).trim()}`);
-  }
-
-  const payload = await response.json() as Record<string, unknown>;
   const inputTokens = Number((payload.usage as Record<string, unknown> | undefined)?.input_tokens ?? 0);
   const outputTokens = Number((payload.usage as Record<string, unknown> | undefined)?.output_tokens ?? 0);
   const rawText = extractOutputText(payload);
@@ -856,6 +927,7 @@ async function requestCodexResponse(apiKey: string, task: ImplementationTask, br
     rawText,
     summary: extractSummary(rawText),
     patch: extractPatch(rawText),
+    diagnostics,
     usage: {
       inputTokens,
       outputTokens,
@@ -1039,6 +1111,7 @@ export const codexProviderInternals = {
   extractDiscoveryKeywords,
   scoreDiscoveryCandidates,
   selectContextFiles,
+  readArchitectureHints,
   renderDiscoveredContext,
   renderRepairPrompt,
   renderApplyRepairPrompt,

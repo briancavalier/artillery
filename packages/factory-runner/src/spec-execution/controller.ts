@@ -45,7 +45,7 @@ export async function runSpecExecution(options: RunSpecExecutionOptions): Promis
   const acceptedSpecs = await adapter.listSpecs();
   const previousStatusBySpec = new Map(
     acceptedSpecs
-      .filter((spec) => spec.data.status === "Approved" && spec.data.decision === "accept")
+      .filter((spec) => spec.data.status === "Architected" && spec.data.decision === "accept")
       .map((spec) => [spec.data.specId, spec.data.status] as const)
   );
   const queued = await enqueueAcceptedSpecs(store, adapter, executionOptions);
@@ -62,8 +62,8 @@ export async function runSpecExecution(options: RunSpecExecutionOptions): Promis
     const evidence = spec ? await Promise.all(spec.data.scenarios.filter((scenario) => scenario.required).map((scenario) => adapter.readScenarioEvidence(task.specId, scenario.id))) : [];
     const entry = {
       specId: task.specId,
-      previousStatus: previousStatusBySpec.get(task.specId) ?? "Approved",
-      finalStatus: spec?.data.status ?? "Approved",
+      previousStatus: previousStatusBySpec.get(task.specId) ?? "Architected",
+      finalStatus: spec?.data.status ?? "Architected",
       taskStatus: task.status,
       runId: task.runId,
       runStatus: run?.status,

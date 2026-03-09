@@ -9,6 +9,8 @@ import {
   type FeatureSpec
 } from "@darkfactory/contracts";
 import type {
+  ArchitectureContext,
+  ArchitectureScope,
   CanarySnapshot,
   DeploymentRecord,
   EvidenceGenerationOptions,
@@ -20,7 +22,9 @@ import type {
   SpecRecord
 } from "@darkfactory/core";
 import {
+  buildArtilleryArchitectureContext,
   buildArtilleryImplementationContext,
+  getArtilleryArchitectureScope,
   getArtilleryImplementationScope
 } from "./context.js";
 import { generateArtilleryScenarioEvidence } from "./evidence.js";
@@ -159,6 +163,14 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
 
     getImplementationScope: async (specId: string): Promise<ImplementationScope> => (
       getArtilleryImplementationScope(specId)
+    ),
+
+    buildArchitectureContext: async (specId: string): Promise<ArchitectureContext> => (
+      buildArtilleryArchitectureContext(config.specDir, specId)
+    ),
+
+    getArchitectureScope: async (specId: string): Promise<ArchitectureScope> => (
+      getArtilleryArchitectureScope(specId)
     ),
 
     readCanarySnapshot: async () => {

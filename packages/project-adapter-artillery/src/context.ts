@@ -1,13 +1,21 @@
 import { access, mkdir, readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { FeatureSpec } from "@darkfactory/contracts";
-import type { ImplementationContext, ImplementationScope } from "@darkfactory/core";
+import type { ArchitectureContext, ArchitectureScope, ImplementationContext, ImplementationScope } from "@darkfactory/core";
 
 export async function buildArtilleryImplementationContext(specDir: string, specId: string): Promise<ImplementationContext> {
   const spec = await loadSpec(specDir, specId);
   const scope = getArtilleryImplementationScope(specId);
-  const seedFiles = await collectSeedFiles(spec);
-  const relevantFiles = await collectRelevantFiles(spec);
+  const architecture = await readArchitectureArtifacts(dirname(specDir), specId);
+  const seedFiles = unique([
+    ...(architecture?.integrationPoints.map((entry) => entry.path) ?? []),
+    ...(await collectSeedFiles(spec))
+  ]);
+  const relevantFiles = unique([
+    ...(architecture?.artifactPaths ?? []),
+    ...(architecture?.integrationPoints.map((entry) => entry.path) ?? []),
+    ...(await collectRelevantFiles(spec))
+  ]);
 
   return {
     specId,
@@ -16,7 +24,7 @@ export async function buildArtilleryImplementationContext(specDir: string, specI
     seedFiles,
     discoveryGoals: buildDiscoveryGoals(spec),
     discoveryBudget: {
-      maxFiles: 40,
+      maxFiles: architecture?.integrationPoints.length ? 24 : 40,
       maxBytes: 200_000
     },
     allowedPaths: scope.allowedPaths,
@@ -37,9 +45,32 @@ export async function buildArtilleryImplementationContext(specDir: string, specI
       "If the required scenarios are unsupported by adapter evidence generation, leave the PR open and blocked.",
       "Terrain changes must remain deterministic across replay and verification runs.",
       "Spawn placement must remain fair and on stable ground.",
-      "Crater deformation must be replay-stable and must not break turn responsiveness."
+      "Crater deformation must be replay-stable and must not break turn responsiveness.",
+      ...(architecture?.invariants.map((entry) => `Architecture invariant: ${entry}`) ?? [])
     ],
     maxFilesChanged: scope.maxFilesChanged
+  };
+}
+
+export async function buildArtilleryArchitectureContext(specDir: string, specId: string): Promise<ArchitectureContext> {
+  const spec = await loadSpec(specDir, specId);
+  const scope = getArtilleryArchitectureScope(specId);
+  const seeds = await collectSeedFiles(spec);
+  return {
+    specId,
+    relevantFiles: await collectRelevantFiles(spec),
+    readPaths: ["**"],
+    seedFiles: seeds,
+    discoveryGoals: buildDiscoveryGoals(spec),
+    reviewNotes: [
+      "Architecture output must stay under architecture/<SpecID>/ only.",
+      "List concrete integration points with ranked priority and write intent.",
+      "List invariants the implementation worker must preserve.",
+      "Cover every required scenario in the scenario trace artifact.",
+      "Do not propose edits to factory-plane packages, workflows, or policy files."
+    ],
+    artifactRoot: scope.artifactRoot,
+    blockedPaths: scope.blockedPaths
   };
 }
 
@@ -62,6 +93,24 @@ export function getArtilleryImplementationScope(specId: string): ImplementationS
       "render.yaml"
     ],
     maxFilesChanged: 24
+  };
+}
+
+export function getArtilleryArchitectureScope(specId: string): ArchitectureScope {
+  return {
+    artifactRoot: `architecture/${specId}`,
+    blockedPaths: [
+      "apps/factory-api/**",
+      "packages/factory-core/**",
+      "packages/factory-runner/**",
+      "packages/implementation-provider-codex/**",
+      "apps/artillery-game/**",
+      "tests/**",
+      ".github/workflows/**",
+      "policy/**",
+      ".env*",
+      "render.yaml"
+    ]
   };
 }
 
@@ -164,4 +213,43 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function readArchitectureArtifacts(rootDir: string, specId: string): Promise<{
+  artifactPaths: string[];
+  integrationPoints: Array<{ path: string; role: string; writeIntent: "edit" | "read-only"; priority: number }>;
+  invariants: string[];
+} | null> {
+  const root = join(rootDir, "architecture", specId);
+  const artifactPaths = [
+    join("architecture", specId, "README.md"),
+    join("architecture", specId, "integration-points.json"),
+    join("architecture", specId, "invariants.json"),
+    join("architecture", specId, "scenario-trace.json")
+  ];
+  const existsAll = await Promise.all(artifactPaths.map((candidate) => exists(join(rootDir, candidate))));
+  if (existsAll.some((present) => !present)) {
+    return null;
+  }
+
+  try {
+    const integrationPoints = JSON.parse(await readFile(join(root, "integration-points.json"), "utf8")) as Array<{
+      path: string;
+      role: string;
+      writeIntent: "edit" | "read-only";
+      priority: number;
+    }>;
+    const invariants = JSON.parse(await readFile(join(root, "invariants.json"), "utf8")) as string[];
+    return {
+      artifactPaths,
+      integrationPoints,
+      invariants
+    };
+  } catch {
+    return null;
+  }
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }

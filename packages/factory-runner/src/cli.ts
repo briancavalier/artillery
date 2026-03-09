@@ -11,6 +11,7 @@ const validSteps: PipelineStep[] = [
   "refine",
   "accept",
   "veto",
+  "architect",
   "implement",
   "verify",
   "deploy",
@@ -18,7 +19,7 @@ const validSteps: PipelineStep[] = [
 ];
 
 if (!step || !validSteps.includes(step)) {
-  console.log("Usage: node dist/packages/factory-runner/src/cli.js <critic|evaluate|refine|accept|veto|implement|verify|deploy|rollback> [SPEC_ID] [REASON]");
+  console.log("Usage: node dist/packages/factory-runner/src/cli.js <critic|evaluate|refine|accept|veto|architect|implement|verify|deploy|rollback> [SPEC_ID] [REASON]");
   process.exitCode = 1;
 } else {
   const adapter = createArtilleryAdapter();

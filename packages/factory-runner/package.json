@@ -12,6 +12,7 @@
     "spec:lint": "node ../../dist/packages/factory-runner/src/spec-lint.js",
     "factory": "node ../../dist/packages/factory-runner/src/cli.js",
     "factory:spec-controller": "node ../../dist/packages/factory-runner/src/spec-controller/cli.js",
+    "factory:spec-architecture": "node ../../dist/packages/factory-runner/src/spec-architecture/cli.js",
     "factory:spec-execution": "node ../../dist/packages/factory-runner/src/spec-execution/cli.js",
     "factory:auto-rollback": "node ../../dist/packages/factory-runner/src/rollback-deploy.js",
     "factory:backfill-events": "node ../../dist/packages/factory-runner/src/backfill-events.js",

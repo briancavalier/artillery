@@ -2,12 +2,18 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { fileURLToPath } from "node:url";
 import type {
   AgentQualityStatus,
+  ArchitectureTaskRequest,
   CloudEventEnvelope,
   FactoryAdminStatus,
   FactoryEventsQuery,
   ImplementationTaskRequest
 } from "@darkfactory/contracts";
 import { createArtilleryAdapter } from "@darkfactory/project-adapter-artillery";
+import {
+  createArchitectureProvider,
+  enqueueApprovedSpecsForArchitecture,
+  processArchitectureQueue
+} from "./architecture.js";
 import { createCodexProvider, enqueueAcceptedSpecs, processImplementationQueue } from "./implementation.js";
 import { createFactoryStore } from "./storage.js";
 
@@ -63,19 +69,25 @@ async function route(request: IncomingMessage, response: ServerResponse, store: 
   }
 
   if (method === "GET" && url.pathname === "/dashboard") {
-    const [factory, agents, deployments, tasks] = await Promise.all([
+    const [factory, agents, deployments, architectureTasks, implementationTasks] = await Promise.all([
       store.getFactoryStatus(),
       store.getAgentStatus(),
       store.getDeployments(25),
+      store.listArchitectureTasks(),
       store.listImplementationTasks()
     ]);
-    const taskDetails = await Promise.all(tasks.slice(0, 25).map(async (task) => ({
+    const architectureDetails = await Promise.all(architectureTasks.slice(0, 25).map(async (task) => ({
+      task,
+      run: task.runId ? await store.getArchitectureRun(task.runId) : null,
+      artifact: task.runId ? await store.getArchitectureArtifact(task.runId) : null
+    })));
+    const taskDetails = await Promise.all(implementationTasks.slice(0, 25).map(async (task) => ({
       task,
       run: task.runId ? await store.getImplementationRun(task.runId) : null,
       artifact: task.runId ? await store.getImplementationArtifact(task.runId) : null
     })));
 
-    await writeHtml(response, 200, renderDashboard(factory, agents, deployments, taskDetails));
+    await writeHtml(response, 200, renderDashboard(factory, agents, deployments, architectureDetails, taskDetails));
     return;
   }
 
@@ -234,6 +246,110 @@ async function route(request: IncomingMessage, response: ServerResponse, store: 
     return;
   }
 
+  if (method === "POST" && url.pathname === "/v1/admin/architecture/tasks") {
+    const body = await readJson<ArchitectureTaskRequest>(request);
+    await writeJson(response, 200, await store.enqueueArchitectureTask(body));
+    return;
+  }
+
+  if (method === "GET" && url.pathname === "/v1/admin/architecture/tasks") {
+    await writeJson(response, 200, { tasks: await store.listArchitectureTasks() });
+    return;
+  }
+
+  const architectureTaskMatch = url.pathname.match(/^\/v1\/admin\/architecture\/tasks\/([^/]+)$/);
+  if (method === "GET" && architectureTaskMatch) {
+    const task = await store.getArchitectureTask(decodeURIComponent(architectureTaskMatch[1] ?? ""));
+    await writeJson(response, task ? 200 : 404, task ?? { error: "Not found" });
+    return;
+  }
+
+  const architectureCancelMatch = url.pathname.match(/^\/v1\/admin\/architecture\/tasks\/([^/]+)\/cancel$/);
+  if (method === "POST" && architectureCancelMatch) {
+    const task = await store.getArchitectureTask(decodeURIComponent(architectureCancelMatch[1] ?? ""));
+    if (!task) {
+      await writeJson(response, 404, { error: "Not found" });
+      return;
+    }
+    task.status = "aborted";
+    task.updatedAt = new Date().toISOString();
+    await store.writeArchitectureTask(task);
+    await writeJson(response, 200, task);
+    return;
+  }
+
+  const architectureRetryMatch = url.pathname.match(/^\/v1\/admin\/architecture\/tasks\/([^/]+)\/retry$/);
+  if (method === "POST" && architectureRetryMatch) {
+    const task = await store.getArchitectureTask(decodeURIComponent(architectureRetryMatch[1] ?? ""));
+    if (!task) {
+      await writeJson(response, 404, { error: "Not found" });
+      return;
+    }
+    task.status = "queued";
+    task.runId = undefined;
+    task.blockedReason = undefined;
+    task.failedReason = undefined;
+    task.attempt += 1;
+    task.updatedAt = new Date().toISOString();
+    await store.writeArchitectureTask(task);
+    await writeJson(response, 200, task);
+    return;
+  }
+
+  const architectureRunMatch = url.pathname.match(/^\/v1\/admin\/architecture\/runs\/([^/]+)$/);
+  if (method === "GET" && architectureRunMatch) {
+    const runId = decodeURIComponent(architectureRunMatch[1] ?? "");
+    const [run, artifact] = await Promise.all([
+      store.getArchitectureRun(runId),
+      store.getArchitectureArtifact(runId)
+    ]);
+    if (!run) {
+      await writeJson(response, 404, { error: "Not found" });
+      return;
+    }
+    await writeJson(response, 200, { run, artifact });
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/v1/admin/architecture/drain") {
+    const adapter = createArtilleryAdapter();
+    const repository = process.env.GITHUB_REPOSITORY ?? "";
+    const [owner, repo] = repository.split("/");
+    const provider = createArchitectureProvider(owner, repo);
+    const processed = await processArchitectureQueue(store, adapter, provider, {
+      actor: process.env.FACTORY_ACTOR ?? "architecture_worker",
+      source: process.env.FACTORY_SOURCE ?? "darkfactory.architecture",
+      deployId: process.env.DEPLOY_ID,
+      repoFullName: repository,
+      owner,
+      repo,
+      baseBranch: process.env.GITHUB_REF_NAME ?? "main",
+      baseSha: process.env.GITHUB_SHA ?? "",
+      reportRootDir: process.cwd()
+    });
+    await writeJson(response, 200, { tasks: processed });
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/v1/admin/architecture/enqueue-approved") {
+    const adapter = createArtilleryAdapter();
+    const repository = process.env.GITHUB_REPOSITORY ?? "";
+    const [owner, repo] = repository.split("/");
+    const queued = await enqueueApprovedSpecsForArchitecture(store, adapter, {
+      actor: process.env.FACTORY_ACTOR ?? "architecture_worker",
+      source: process.env.FACTORY_SOURCE ?? "darkfactory.architecture",
+      deployId: process.env.DEPLOY_ID,
+      repoFullName: repository,
+      owner,
+      repo,
+      baseBranch: process.env.GITHUB_REF_NAME ?? "main",
+      baseSha: process.env.GITHUB_SHA ?? "",
+      reportRootDir: process.cwd()
+    });
+    await writeJson(response, 200, { tasks: queued });
+    return;
+  }
+
   if (method === "POST" && url.pathname === "/v1/events") {
     const body = await readJson<CloudEventEnvelope<Record<string, unknown>>>(request);
     validateCloudEvent(body);
@@ -297,6 +413,11 @@ function renderDashboard(
   factory: FactoryAdminStatus,
   agents: AgentQualityStatus,
   deployments: Array<Record<string, unknown>>,
+  architectureDetails: Array<{
+    task: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["listArchitectureTasks"]>>[number];
+    run: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["getArchitectureRun"]>>;
+    artifact: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["getArchitectureArtifact"]>>;
+  }>,
   taskDetails: Array<{
     task: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["listImplementationTasks"]>>[number];
     run: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["getImplementationRun"]>>;
@@ -327,6 +448,17 @@ function renderDashboard(
       return `<tr><td>${escapeHtml(task.specId)}</td><td>${escapeHtml(task.status)}</td><td>${escapeHtml(task.provider ?? "")}</td><td>${escapeHtml(task.model ?? "")}</td><td>${escapeHtml(task.updatedAt)}</td><td class="metadata">${escapeHtml(discoverySummary)}</td><td class="metadata">${escapeHtml(selected)}</td></tr>`;
     }).join("")
     : `<tr><td colspan="7" class="empty">No implementation tasks recorded.</td></tr>`;
+  const architectureRows = architectureDetails.length > 0
+    ? architectureDetails.map(({ task, artifact, run }) => {
+      const selected = Array.isArray(run?.metadata?.selectedContextFiles)
+        ? String((run?.metadata?.selectedContextFiles as string[]).slice(0, 5).join(", "))
+        : "";
+      const invariants = Array.isArray(artifact?.payload?.invariants)
+        ? String(artifact?.payload?.invariants.slice(0, 2).join(" | "))
+        : "";
+      return `<tr><td>${escapeHtml(task.specId)}</td><td>${escapeHtml(task.status)}</td><td>${escapeHtml(task.provider ?? "")}</td><td>${escapeHtml(task.updatedAt)}</td><td class="metadata">${escapeHtml(selected)}</td><td class="metadata">${escapeHtml(invariants)}</td></tr>`;
+    }).join("")
+    : `<tr><td colspan="6" class="empty">No architecture tasks recorded.</td></tr>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -363,12 +495,15 @@ function renderDashboard(
     <section class="header">
       <div>
         <h1>Factory Dashboard</h1>
-        <p>Dark factory status, deployment history, and implementation worker health.</p>
+        <p>Dark factory status, architecture pipeline, deployment history, and implementation worker health.</p>
       </div>
       <span class="status ${statusClass}">${escapeHtml(factory.status)}</span>
     </section>
     <section class="cards">
       <article class="card"><div class="label">Queued Specs</div><div class="value">${factory.pipeline.queuedSpecs}</div></article>
+      <article class="card"><div class="label">Architecture Queue</div><div class="value">${factory.pipeline.architectureQueueDepth ?? 0}</div></article>
+      <article class="card"><div class="label">Architected Today</div><div class="value">${factory.pipeline.architectureMergedToday ?? 0}</div></article>
+      <article class="card"><div class="label">Architecture Blocked</div><div class="value">${factory.pipeline.architectureBlockedToday ?? 0}</div></article>
       <article class="card"><div class="label">Implementation Queue</div><div class="value">${factory.pipeline.implementationQueueDepth ?? 0}</div></article>
       <article class="card"><div class="label">Merged Tasks</div><div class="value">${factory.pipeline.implementationMergedToday ?? 0}</div></article>
       <article class="card"><div class="label">Blocked Tasks</div><div class="value">${factory.pipeline.implementationBlockedToday ?? 0}</div></article>
@@ -378,6 +513,7 @@ function renderDashboard(
       <article class="card"><div class="label">Regression Rate</div><div class="value">${agents.regressionRate.toFixed(2)}</div></article>
     </section>
     <section class="card"><h2>Recent Deployments</h2><table><thead><tr><th>At</th><th>Spec</th><th>Deploy</th><th>Metadata</th></tr></thead><tbody>${deploymentRows}</tbody></table></section>
+    <section class="card"><h2>Architecture Tasks</h2><table><thead><tr><th>Spec</th><th>Status</th><th>Provider</th><th>Updated</th><th>Selected Files</th><th>Invariants</th></tr></thead><tbody>${architectureRows}</tbody></table></section>
     <section class="card"><h2>Implementation Tasks</h2><table><thead><tr><th>Spec</th><th>Status</th><th>Provider</th><th>Model</th><th>Updated</th><th>Discovery</th><th>Selected Files</th></tr></thead><tbody>${taskRows}</tbody></table></section>
   </div>
 </body>

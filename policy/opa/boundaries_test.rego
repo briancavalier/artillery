@@ -98,6 +98,48 @@ test_deny_spec_execution_prod_secret if {
   denies["spec-execution workflow must not reference production secrets"]
 }
 
+test_deny_spec_architecture_missing_permissions if {
+  test_input := {
+    "imports": [],
+    "contracts": {"issues": []},
+    "workflows": [{
+      "file": ".github/workflows/spec-architecture.yml",
+      "triggerPullRequestLike": false,
+      "usesProdSecret": false,
+      "usesEnvironmentProd": false,
+      "specArchitecture": {
+        "hasPermissions": false,
+        "hasAttestationPermission": true,
+        "usesProdSecret": false,
+        "usesProductionEnvironment": false
+      }
+    }]
+  }
+  denies := data.darkfactory.deny with input as test_input
+  denies["spec-architecture workflow missing required permissions"]
+}
+
+test_deny_spec_architecture_prod_secret if {
+  test_input := {
+    "imports": [],
+    "contracts": {"issues": []},
+    "workflows": [{
+      "file": ".github/workflows/spec-architecture.yml",
+      "triggerPullRequestLike": false,
+      "usesProdSecret": false,
+      "usesEnvironmentProd": false,
+      "specArchitecture": {
+        "hasPermissions": true,
+        "hasAttestationPermission": true,
+        "usesProdSecret": true,
+        "usesProductionEnvironment": false
+      }
+    }]
+  }
+  denies := data.darkfactory.deny with input as test_input
+  denies["spec-architecture workflow must not reference production secrets"]
+}
+
 test_deny_implementation_provider_importing_game if {
   test_input := {
     "contracts": {"issues": []},

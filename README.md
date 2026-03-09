@@ -75,12 +75,14 @@ npm run factory:evaluate
 npm run factory:refine
 npm run factory:accept -- SPEC-0001
 npm run factory:veto -- SPEC-0001 "reason"
+npm run factory:architect -- SPEC-0001
 npm run factory:implement
 npm run factory:verify
 npm run factory:deploy
 npm run factory:rollback -- SPEC-0001 "reason"
 npm run factory:auto-rollback
 npm run factory:spec-controller -- analyze
+npm run factory:spec-architecture
 npm run factory:spec-execution -- act
 npm run canary
 npm run reports:generate
@@ -110,6 +112,7 @@ Workflows:
 - `.github/workflows/autonomous-deploy.yml`: staging then production autonomous deployment
 - `.github/workflows/weekly-learning.yml`: scheduled learning/proposals run
 - `.github/workflows/spec-controller.yml`: PR spec analysis + label-driven governance
+- `.github/workflows/spec-architecture.yml`: `main` branch architecture queue + artifact PR auto-merge
 - `.github/workflows/spec-execution.yml`: `main` branch implementation queue + evidence-driven advancement
 
 Render blueprint:
@@ -173,13 +176,32 @@ Rationale directive required for `veto` and `rollback`:
 
 `/factory-reason SPEC-xxxx: <reason text>`
 
+## Spec Architecture (Post-Merge Automation)
+
+`spec-architecture.yml` runs on trusted `main` pushes after an accepted spec lands on `main`.
+
+- Enqueues accepted `Approved` specs into the factory architecture queue.
+- Builds a project-scoped architecture context and repo-wide discovery seed set from the artillery adapter.
+- Invokes the Codex architect provider on `codex/architect-<spec-id>`.
+- Publishes repo-tracked artifacts under `architecture/<SpecID>/`.
+- Auto-marks PRs ready and auto-merges only when the PR touches architecture artifact paths only and CI/policy checks pass.
+- Advances accepted specs through `Approved -> Architected`.
+
+Architecture artifacts:
+
+- `architecture/<SpecID>/README.md`
+- `architecture/<SpecID>/integration-points.json`
+- `architecture/<SpecID>/invariants.json`
+- `architecture/<SpecID>/scenario-trace.json`
+
 ## Spec Execution (Post-Merge Automation)
 
-`spec-execution.yml` runs on trusted `main` pushes and handles the gap after a spec is approved and merged.
+`spec-execution.yml` runs on trusted `main` pushes after a spec is `Architected`.
 
-- Enqueues accepted `Approved` specs into the factory implementation queue.
-- Builds a project-scoped implementation context and path allowlist from the artillery adapter.
+- Enqueues accepted `Architected` specs into the factory implementation queue.
+- Builds a project-scoped implementation context from the artillery adapter plus architecture artifacts.
 - Invokes the pluggable Codex implementation provider on `codex/implement-<spec-id>`.
+- Uses repo-wide read discovery with narrow write allowlists. Architecture-selected integration points are mandatory context; supplemental discovery is capped.
 - Runs local build/test/policy checks plus adapter-backed scenario evidence generation.
 - Auto-marks PRs ready and auto-merges only after evidence, CI, policy, and branch protection gates pass.
 - Leaves the PR open and the task `blocked` or `failed` when:

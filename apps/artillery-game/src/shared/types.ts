@@ -101,6 +101,7 @@ export type SpecStatus =
   | "Critiqued"
   | "Refined"
   | "Approved"
+  | "Architected"
   | "Implemented"
   | "Verified"
   | "Deployed";

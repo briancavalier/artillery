@@ -11,6 +11,7 @@ export const REPO_ROOT = process.cwd();
 export async function createTempWorkspace(): Promise<string> {
   const workspace = await mkdtemp(join(tmpdir(), "artillery-test-"));
   await mkdir(join(workspace, "specs"), { recursive: true });
+  await mkdir(join(workspace, "architecture"), { recursive: true });
   await mkdir(join(workspace, "evidence"), { recursive: true });
   await mkdir(join(workspace, "reports"), { recursive: true });
   await mkdir(join(workspace, "ops/canary"), { recursive: true });
