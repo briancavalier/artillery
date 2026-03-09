@@ -1,13 +1,13 @@
 {
   "version": "v1",
-  "generatedAt": "2026-03-09T23:40:49.612Z",
+  "generatedAt": "2026-03-09T23:57:42.438Z",
   "repository": "briancavalier/artillery",
   "branch": "main",
-  "commitSha": "a36300372d24201a255179c2d845626d344d84a1",
+  "commitSha": "a51d4ef59bb78d2bccc933a8b4fd3a434366a087",
   "queued": [
     {
       "specId": "SPEC-0003",
-      "taskId": "ad98267c-06ee-4666-9ae0-f198ccf6d911",
+      "taskId": "3f3be774-6a2e-48b9-a3ef-7b964d016cc0",
       "branchName": "codex/implement-spec-0003",
       "status": "queued",
       "created": true
@@ -19,15 +19,15 @@
       "previousStatus": "Architected",
       "finalStatus": "Architected",
       "taskStatus": "failed",
-      "runId": "03dbdbde-39ff-40b3-95ef-fcdf71f4d593",
+      "runId": "0d065c98-87cb-4c91-8e12-9ccfbd1d3a36",
       "runStatus": "failed",
       "runResult": "failed",
       "provider": "openai-codex",
       "model": "gpt-5-codex",
       "evidenceGenerated": 4,
       "passedEvidence": 0,
-      "failureReason": "OpenAI Responses API timed out after 45000ms (artifact missing)",
-      "runSummary": "OpenAI Responses API timed out after 45000ms",
+      "failureReason": "OpenAI Responses API timed out after 120000ms (artifact missing)",
+      "runSummary": "OpenAI Responses API timed out after 120000ms",
       "discoveryFilesRead": [
         "architecture/SPEC-0003/README.md",
         "architecture/SPEC-0003/integration-points.json",
