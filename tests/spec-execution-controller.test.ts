@@ -48,6 +48,34 @@ class DummyProvider implements ImplementationProvider {
   }
 }
 
+class FailingProvider implements ImplementationProvider {
+  async startTask(task: ImplementationTask): Promise<ImplementationRun> {
+    return {
+      runId: `run-${task.specId}`,
+      taskId: task.taskId,
+      provider: "dummy",
+      model: "dummy-model",
+      status: "failed",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      result: "failed",
+      usage: { inputTokens: 10, outputTokens: 20, estimatedCostUsd: 0.001 },
+      summary: "synthetic provider failure",
+      traceId: "trace-failed-run"
+    };
+  }
+
+  async getRun(): Promise<ImplementationRun | null> {
+    return null;
+  }
+
+  async cancelRun(): Promise<void> {}
+
+  async collectArtifacts(): Promise<ImplementationArtifact | null> {
+    return null;
+  }
+}
+
 function makeSpec(status: FeatureSpec["status"], scenarioIds: string[]): FeatureSpec {
   return {
     specId: "SPEC-EXEC-1",
@@ -137,6 +165,51 @@ test("execution controller blocks artifacts outside implementation allowlist", a
     });
 
     assert.equal(result.manifest.advanced[0]?.taskStatus, "blocked");
+    const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
+    assert.equal(stored.status, "Approved");
+  } finally {
+    delete process.env.FACTORY_EVENT_MODE;
+    delete process.env.FACTORY_STATE_PATH;
+    delete process.env.IMPLEMENTATION_TEST_MODE;
+  }
+});
+
+test("execution controller surfaces provider failure diagnostics in the manifest", async () => {
+  const workspace = await createTempWorkspace();
+  process.env.FACTORY_EVENT_MODE = "local";
+  process.env.FACTORY_STATE_PATH = join(workspace, "var/factory/state.json");
+  process.env.IMPLEMENTATION_TEST_MODE = "1";
+
+  try {
+    await writeJson(join(workspace, "specs/SPEC-EXEC-1.json"), makeSpec("Approved", ["SCN-0001"]));
+    const adapter = createArtilleryAdapter({
+      specDir: join(workspace, "specs"),
+      evidenceDir: join(workspace, "evidence"),
+      ledgerPath: join(workspace, "var/ledger/events.ndjson"),
+      evaluationsDir: join(workspace, "reports/evaluations"),
+      canaryPath: join(workspace, "ops/canary/latest.json"),
+      dryRun: false,
+      localEventMode: true
+    } as never);
+    const store = await createFactoryStore();
+
+    const result = await runSpecExecution({
+      adapter,
+      store,
+      provider: new FailingProvider(),
+      owner: "owner",
+      repo: "repo",
+      baseBranch: "main",
+      commitSha: "base-sha",
+      reportRootDir: workspace
+    });
+
+    assert.equal(result.manifest.advanced[0]?.taskStatus, "failed");
+    assert.equal(result.manifest.advanced[0]?.runStatus, "failed");
+    assert.equal(result.manifest.advanced[0]?.runResult, "failed");
+    assert.equal(result.manifest.advanced[0]?.traceId, "trace-failed-run");
+    assert.equal(result.manifest.advanced[0]?.failureReason, "synthetic provider failure (artifact missing)");
+    assert.equal(result.manifest.advanced[0]?.runSummary, "synthetic provider failure");
     const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
     assert.equal(stored.status, "Approved");
   } finally {

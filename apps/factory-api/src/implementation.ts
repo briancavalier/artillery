@@ -141,7 +141,7 @@ export async function processImplementationQueue(
 
       if (run.status === "failed" || run.result === "failed" || !artifact) {
         task.status = "failed";
-        task.failedReason = run.summary ?? "provider failed";
+        task.failedReason = !artifact && run.summary ? `${run.summary} (artifact missing)` : (run.summary ?? "provider failed");
         task.updatedAt = new Date().toISOString();
         await store.writeImplementationTask(task);
         await emit(adapter, options, "implementation_task_failed", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
@@ -179,6 +179,14 @@ export async function processImplementationQueue(
         task.status = "blocked";
         task.blockedReason = policyResult.reason;
         task.updatedAt = new Date().toISOString();
+        await store.writeImplementationRun({
+          ...run,
+          metadata: {
+            ...(run.metadata ?? {}),
+            orchestrationState: "blocked",
+            orchestrationReason: policyResult.reason
+          }
+        });
         await store.writeImplementationTask(task);
         await emit(adapter, options, "implementation_task_blocked", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
           taskId: task.taskId,
@@ -281,6 +289,19 @@ export async function processImplementationQueue(
       task.status = "failed";
       task.failedReason = error instanceof Error ? error.message : String(error);
       task.updatedAt = new Date().toISOString();
+      if (task.runId) {
+        const run = await store.getImplementationRun(task.runId);
+        if (run) {
+          await store.writeImplementationRun({
+            ...run,
+            metadata: {
+              ...(run.metadata ?? {}),
+              orchestrationState: "failed",
+              orchestrationReason: task.failedReason
+            }
+          });
+        }
+      }
       await store.writeImplementationTask(task);
       await emit(adapter, options, "implementation_task_failed", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
         taskId: task.taskId,

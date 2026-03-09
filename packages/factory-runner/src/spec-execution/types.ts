@@ -13,8 +13,19 @@ export interface ExecutionAdvanceItem {
   previousStatus: SpecStatus;
   finalStatus: SpecStatus;
   taskStatus: string;
+  runId?: string;
+  runStatus?: string;
+  runResult?: string;
+  provider?: string;
+  model?: string;
+  traceId?: string;
   evidenceGenerated: number;
   passedEvidence: number;
+  testsPassed?: number;
+  testsFailed?: number;
+  blockedReason?: string;
+  failureReason?: string;
+  runSummary?: string;
   pullRequestNumber?: number;
   pullRequestUrl?: string;
 }

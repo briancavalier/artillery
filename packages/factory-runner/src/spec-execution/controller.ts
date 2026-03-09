@@ -57,17 +57,35 @@ export async function runSpecExecution(options: RunSpecExecutionOptions): Promis
   const advanced = [];
   for (const task of processed) {
     const spec = await adapter.readSpecById(task.specId);
+    const run = task.runId ? await store.getImplementationRun(task.runId) : null;
+    const artifact = task.runId ? await store.getImplementationArtifact(task.runId) : null;
     const evidence = spec ? await Promise.all(spec.data.scenarios.filter((scenario) => scenario.required).map((scenario) => adapter.readScenarioEvidence(task.specId, scenario.id))) : [];
-    advanced.push({
+    const entry = {
       specId: task.specId,
       previousStatus: previousStatusBySpec.get(task.specId) ?? "Approved",
       finalStatus: spec?.data.status ?? "Approved",
       taskStatus: task.status,
+      runId: task.runId,
+      runStatus: run?.status,
+      runResult: run?.result,
+      provider: run?.provider ?? task.provider,
+      model: run?.model ?? task.model,
+      traceId: run?.traceId,
       evidenceGenerated: evidence.filter(Boolean).length,
       passedEvidence: evidence.filter((entry) => entry?.passed).length,
-      pullRequestNumber: task.prNumber,
-      pullRequestUrl: task.prUrl
-    });
+      testsPassed: artifact?.testSummary.passed,
+      testsFailed: artifact?.testSummary.failed,
+      blockedReason: task.blockedReason,
+      failureReason: task.failedReason,
+      runSummary: run?.summary,
+      pullRequestNumber: task.prNumber ?? artifact?.prNumber,
+      pullRequestUrl: task.prUrl ?? artifact?.prUrl
+    };
+    advanced.push(entry);
+    if (task.status === "failed" || task.status === "blocked") {
+      const reason = entry.failureReason ?? entry.blockedReason ?? entry.runSummary ?? "No diagnostic reason recorded";
+      console.error(`[spec-execution] ${task.specId} ${task.status}: ${reason}`);
+    }
   }
 
   const manifest: ExecutionManifest = {

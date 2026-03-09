@@ -55,7 +55,12 @@ export class CodexImplementationProvider implements ImplementationProvider {
         status: "blocked",
         finishedAt: new Date().toISOString(),
         result: "blocked",
-        summary: "OPENAI_API_KEY is not configured"
+        summary: "OPENAI_API_KEY is not configured",
+        metadata: {
+          branch,
+          phase: "provider_init",
+          reason: "missing_openai_api_key"
+        }
       };
       this.runs.set(runId, { run, artifact: null });
       return run;
@@ -112,7 +117,22 @@ export class CodexImplementationProvider implements ImplementationProvider {
           status: "blocked",
           finishedAt: new Date().toISOString(),
           result: "blocked",
-          summary: "Codex did not return a patch."
+          summary: "Codex did not return a patch.",
+          traceId: typeof payload.id === "string" ? payload.id : undefined,
+          usage: {
+            inputTokens: Number((payload.usage as Record<string, unknown> | undefined)?.input_tokens ?? 0),
+            outputTokens: Number((payload.usage as Record<string, unknown> | undefined)?.output_tokens ?? 0),
+            estimatedCostUsd: estimateCost(
+              Number((payload.usage as Record<string, unknown> | undefined)?.input_tokens ?? 0),
+              Number((payload.usage as Record<string, unknown> | undefined)?.output_tokens ?? 0)
+            )
+          },
+          metadata: {
+            branch,
+            phase: "provider_response",
+            reason: "empty_patch",
+            responseId: payload.id
+          }
         };
         this.runs.set(runId, { run, artifact: null });
         return run;
@@ -159,7 +179,13 @@ export class CodexImplementationProvider implements ImplementationProvider {
         status: "failed",
         finishedAt: new Date().toISOString(),
         result: "failed",
-        summary: error instanceof Error ? error.message : String(error)
+        summary: error instanceof Error ? error.message : String(error),
+        metadata: {
+          branch,
+          phase: "provider_execution",
+          errorName: error instanceof Error ? error.name : "Error",
+          stack: error instanceof Error ? error.stack : undefined
+        }
       };
       this.runs.set(runId, { run, artifact: null });
       return run;
