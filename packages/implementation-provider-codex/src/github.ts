@@ -67,7 +67,7 @@ export class GitHubAutomationApi {
   }
 
   async findPullRequestByHead(owner: string, repo: string, head: string): Promise<GitHubPullRequestDetails | null> {
-    const response = await this.request<PullRequestResponse[]>("GET", `/repos/${owner}/${repo}/pulls?state=all&head=${encodeURIComponent(head)}&per_page=1`);
+    const response = await this.request<PullRequestResponse[]>("GET", `/repos/${owner}/${repo}/pulls?state=open&head=${encodeURIComponent(head)}&per_page=1`);
     const pull = response[0];
     return pull ? toPullRequestDetails(pull) : null;
   }

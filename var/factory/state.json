@@ -46,15 +46,17 @@
           "render.yaml"
         ]
       },
-      "status": "merged",
+      "status": "blocked",
       "createdAt": "2026-03-09T01:04:15.229Z",
-      "updatedAt": "2026-03-09T01:05:50.596Z",
+      "updatedAt": "2026-03-09T01:19:44.000Z",
       "runId": "a85c12a5-24c1-47a0-bfd4-f1a387f33385",
       "provider": "openai-codex",
       "model": "gpt-5-codex",
       "prNumber": 3,
       "prUrl": "https://github.com/briancavalier/artillery/pull/3",
-      "branch": "codex/implement-spec-0003"
+      "branch": "codex/implement-spec-0003",
+      "blockedReason": "Recovered from pre-evidence-gate merge; requeue required under fixed gate.",
+      "failedReason": null
     }
   ],
   "implementationRuns": [

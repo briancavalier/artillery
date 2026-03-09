@@ -85,3 +85,20 @@ test("dispatchWorkflow posts a workflow dispatch for the target ref", async () =
   assert.deepEqual(calls[0]?.body, { ref: "codex/implement-spec-0003" });
   assert.equal(calls[0]?.headers.get("X-GitHub-Api-Version"), "2022-11-28");
 });
+
+test("findPullRequestByHead only queries open pull requests", async () => {
+  let requestedUrl = "";
+  const fetchImpl: typeof fetch = async (input) => {
+    requestedUrl = String(input);
+    return new Response(JSON.stringify([]), { status: 200 });
+  };
+
+  const api = new GitHubAutomationApi("token", fetchImpl, "https://api.github.test");
+  const result = await api.findPullRequestByHead("owner", "repo", "owner:codex/implement-spec-0003");
+
+  assert.equal(result, null);
+  assert.equal(
+    requestedUrl,
+    "https://api.github.test/repos/owner/repo/pulls?state=open&head=owner%3Acodex%2Fimplement-spec-0003&per_page=1"
+  );
+});

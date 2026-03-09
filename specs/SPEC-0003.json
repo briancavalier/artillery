@@ -3,7 +3,7 @@
   "title": "High-resolution terrain for precision artillery matches",
   "source": "human",
   "owner": "@briancavalier",
-  "status": "Implemented",
+  "status": "Approved",
   "decision": "accept",
   "intent": "Increase match quality and strategic depth by generating high-resolution terrain silhouettes that look natural, play fairly, and support precise shot outcomes and crater feedback in every multiplayer match.",
   "scenarios": [
@@ -62,5 +62,5 @@
   ],
   "riskNotes": "Risk: added terrain detail can introduce unfair spawn states or slower turn latency. Mitigation: enforce spawn/playability constraints, deterministic replay checks, and strict performance budgets before promotion.",
   "createdAt": "2026-03-08T01:23:25.000Z",
-  "updatedAt": "2026-03-09T01:05:50.593Z"
+  "updatedAt": "2026-03-09T01:19:44.000Z"
 }
