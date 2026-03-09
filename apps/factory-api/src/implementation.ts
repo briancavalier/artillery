@@ -243,6 +243,7 @@ export async function processImplementationQueue(
           await buildGitHubApi().markReadyForReview(options.owner, options.repo, artifact.prNumber);
         }
 
+        await buildGitHubApi().dispatchWorkflow(options.owner, options.repo, "ci.yml", artifact.branch);
         await waitForRemoteChecks(options.owner, options.repo, artifact.commitSha, task.limits.maxDurationMs);
         const refreshed = await buildGitHubApi().getPullRequest(options.owner, options.repo, artifact.prNumber);
         if (refreshed.mergeable === false || !["clean", "has_hooks", "unstable", "unknown"].includes(refreshed.mergeableState)) {

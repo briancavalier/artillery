@@ -63,3 +63,25 @@ test("markReadyForReview tolerates 422 from REST endpoint", async () => {
   await api.markReadyForReview("owner", "repo", 7);
   assert.equal(callCount, 1);
 });
+
+test("dispatchWorkflow posts a workflow dispatch for the target ref", async () => {
+  const calls: Array<{ url: string; method: string; body: unknown; headers: Headers }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    calls.push({
+      url: String(input),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      headers: new Headers(init?.headers)
+    });
+    return new Response(null, { status: 204 });
+  };
+
+  const api = new GitHubAutomationApi("token", fetchImpl, "https://api.github.test");
+  await api.dispatchWorkflow("owner", "repo", "ci.yml", "codex/implement-spec-0003");
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.url, "https://api.github.test/repos/owner/repo/actions/workflows/ci.yml/dispatches");
+  assert.equal(calls[0]?.method, "POST");
+  assert.deepEqual(calls[0]?.body, { ref: "codex/implement-spec-0003" });
+  assert.equal(calls[0]?.headers.get("X-GitHub-Api-Version"), "2022-11-28");
+});

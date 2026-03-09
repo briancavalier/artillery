@@ -165,7 +165,7 @@ function collectSpecExecutionFacts(raw) {
 
   return {
     hasPermissions:
-      /permissions:\s*[\s\S]*?contents:\s*write[\s\S]*?pull-requests:\s*write[\s\S]*?id-token:\s*write/m.test(executeBlock),
+      /permissions:\s*[\s\S]*?actions:\s*write[\s\S]*?contents:\s*write[\s\S]*?pull-requests:\s*write[\s\S]*?id-token:\s*write/m.test(executeBlock),
     hasAttestationPermission: /attestations:\s*write/m.test(executeBlock),
     usesProdSecret: /RENDER_PROD_DEPLOY_HOOK|DATABASE_URL_PROD/i.test(raw),
     usesProductionEnvironment: /environment:\s*production/i.test(raw)

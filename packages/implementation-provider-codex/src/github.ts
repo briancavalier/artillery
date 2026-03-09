@@ -77,6 +77,10 @@ export class GitHubAutomationApi {
     return toPullRequestDetails(response);
   }
 
+  async dispatchWorkflow(owner: string, repo: string, workflowId: string, ref: string): Promise<void> {
+    await this.request("POST", `/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowId)}/dispatches`, { ref });
+  }
+
   async markReadyForReview(owner: string, repo: string, pullNumber: number): Promise<void> {
     try {
       await this.request("POST", `/repos/${owner}/${repo}/pulls/${pullNumber}/ready_for_review`);
