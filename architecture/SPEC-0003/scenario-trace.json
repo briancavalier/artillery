@@ -1,0 +1,51 @@
+[
+  {
+    "scenarioId": "SCN-0301",
+    "filePaths": [
+      "apps/artillery-game/src/shared/terrain/generator.ts",
+      "apps/artillery-game/src/shared/simulation.ts",
+      "tests/terrain-playability.test.ts"
+    ],
+    "evidenceHooks": [
+      "playability:spawnValidation",
+      "visual-baseline:terrainSilhouette"
+    ]
+  },
+  {
+    "scenarioId": "SCN-0302",
+    "filePaths": [
+      "apps/artillery-game/src/shared/terrain/generator.ts",
+      "apps/artillery-game/src/shared/terrain/crater.ts",
+      "tests/determinism.test.ts",
+      "packages/project-adapter-artillery/src/evidence.ts"
+    ],
+    "evidenceHooks": [
+      "determinism:terrainStateHash",
+      "replay:commandLedger"
+    ]
+  },
+  {
+    "scenarioId": "SCN-0303",
+    "filePaths": [
+      "apps/artillery-game/src/shared/terrain/crater.ts",
+      "apps/artillery-game/src/shared/simulation.ts",
+      "tests/terrain-deformation.test.ts"
+    ],
+    "evidenceHooks": [
+      "physics-regression:impactSweep",
+      "visual-baseline:craterProfiles"
+    ]
+  },
+  {
+    "scenarioId": "SCN-0304",
+    "filePaths": [
+      "apps/artillery-game/src/server/match-store.ts",
+      "apps/artillery-game/src/shared/terrain/generator.ts",
+      "tests/performance-terrain.test.ts"
+    ],
+    "evidenceHooks": [
+      "performance:matchStartBudget",
+      "canary:turnLatency"
+    ]
+  }
+]

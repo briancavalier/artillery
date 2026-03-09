@@ -1,0 +1,8 @@
+[
+  "MatchState.terrain.surface.heights.length must equal MatchState.terrain.surface.sampleCount (default 512) after generation and after every deformation.",
+  "MatchState.terrain.surface.metrics must report variationScore >= 0.15 and have ridgeCount, valleyCount, and flatPocketCount all >= 1 to guarantee visible variety at match start.",
+  "Each entry in MatchState.terrain.surface.spawnSlots must maintain |slope| <= 0.2 and be marked occupiedBy only by addPlayer; no two players share the same slot.",
+  "applyCrater() may only mutate heights within the computed impact radius and must keep every height within [groundMin, groundMax] bounds.",
+  "TerrainSurface.version increments by exactly one per deformation and is included in publicState so replay hashes can enforce determinism.",
+  "Terrain generation plus first turn setup must complete within the performance budget (e.g., <5ms for buildTerrain, <10ms for fire-command crater) as recorded in MatchStore latency telemetry."
+]
