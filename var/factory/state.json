@@ -1,0 +1,133 @@
+{
+  "events": [],
+  "implementationTasks": [
+    {
+      "taskId": "c3cd7399-860d-40f5-aa5e-e40478dbd67c",
+      "specId": "SPEC-0003",
+      "source": "human",
+      "owner": "@briancavalier",
+      "repo": "briancavalier/artillery",
+      "baseBranch": "main",
+      "baseSha": "421357b99cea0d410d069241bac1278dc79ecf87",
+      "targetBranch": "codex/implement-spec-0003",
+      "allowedPaths": [
+        "apps/artillery-game/**",
+        "tests/**",
+        "evidence/SPEC-0003/**",
+        "docs/**"
+      ],
+      "verificationTargets": [
+        "SCN-0301",
+        "SCN-0302",
+        "SCN-0303",
+        "SCN-0304"
+      ],
+      "contextBundleRef": "/home/runner/work/artillery/artillery/reports/implementation-context/SPEC-0003.md",
+      "attempt": 0,
+      "priority": 100,
+      "limits": {
+        "maxTurns": 6,
+        "maxDurationMs": 900000,
+        "maxCostUsd": 5,
+        "maxFilesChanged": 24
+      },
+      "policy": {
+        "allowAutoMerge": true,
+        "allowShell": true,
+        "allowNetwork": false,
+        "blockedPaths": [
+          "apps/factory-api/**",
+          "packages/factory-core/**",
+          "packages/factory-runner/**",
+          "packages/implementation-provider-codex/**",
+          ".github/workflows/**",
+          "policy/**",
+          ".env*",
+          "render.yaml"
+        ]
+      },
+      "status": "merged",
+      "createdAt": "2026-03-09T01:04:15.229Z",
+      "updatedAt": "2026-03-09T01:05:50.596Z",
+      "runId": "a85c12a5-24c1-47a0-bfd4-f1a387f33385",
+      "provider": "openai-codex",
+      "model": "gpt-5-codex",
+      "prNumber": 3,
+      "prUrl": "https://github.com/briancavalier/artillery/pull/3",
+      "branch": "codex/implement-spec-0003"
+    }
+  ],
+  "implementationRuns": [
+    {
+      "runId": "a85c12a5-24c1-47a0-bfd4-f1a387f33385",
+      "taskId": "c3cd7399-860d-40f5-aa5e-e40478dbd67c",
+      "provider": "openai-codex",
+      "model": "gpt-5-codex",
+      "status": "completed",
+      "startedAt": "2026-03-09T01:04:15.232Z",
+      "usage": {
+        "inputTokens": 612,
+        "outputTokens": 1722,
+        "estimatedCostUsd": 0.017985
+      },
+      "finishedAt": "2026-03-09T01:04:53.610Z",
+      "result": "pr_opened",
+      "traceId": "resp_042f64e45dbed70d0069ae1ca98dfc819c8afae5ff8d2aaab7",
+      "summary": "Documented missing SPEC-0003 specification details as a blocker.",
+      "metadata": {
+        "branch": "codex/implement-spec-0003",
+        "responseId": "resp_042f64e45dbed70d0069ae1ca98dfc819c8afae5ff8d2aaab7",
+        "attempts": [
+          {
+            "attempt": 1,
+            "responseId": "resp_0ba0c2a50f9759e20069ae1c8fd99481968ea8192d21f5b14e",
+            "repair": false,
+            "validationError": "Codex returned PATCH content that is not a valid unified diff.",
+            "rawOutputPreview": "SUMMARY:\nBlocked: SPEC-0003 requirements are not provided, so implementation details are unavailable.\n\nPATCH:\n```diff\n```"
+          },
+          {
+            "attempt": 2,
+            "responseId": "resp_0431f1beb2a7a0630069ae1c96c0a4819c985d323754721fea",
+            "repair": true,
+            "repairKind": "format",
+            "validationError": "Checking patch docs/SPEC-0003-blocker.md...\nerror: docs/SPEC-0003-blocker.md: already exists in working directory",
+            "rawOutputPreview": "SUMMARY:\nBlocked: SPEC-0003 specification details are unavailable in the provided context.\n\nPATCH:\n```diff\ndiff --git a/docs/SPEC-0003-blocker.md b/docs/SPEC-0003-blocker.md\nnew file mode 100644\n--- /dev/null\n+++ b/docs/SPEC-0003-blocker.md\n@@\n+# SPEC-0003 Blocked\n+\n+Implementation for SPEC-0003 is currently blocked because the specification\n+details were not included in the provided context bundle.\n+Without the spec it is impossible to determine the required behavior changes.\n```"
+          },
+          {
+            "attempt": 3,
+            "responseId": "resp_042f64e45dbed70d0069ae1ca98dfc819c8afae5ff8d2aaab7",
+            "repair": true,
+            "repairKind": "format",
+            "rawOutputPreview": "SUMMARY:\nDocumented missing SPEC-0003 specification details as a blocker.\n\nPATCH:\n```diff\ndiff --git a/docs/SPEC-0003-blocked.md b/docs/SPEC-0003-blocked.md\nnew file mode 100644\n--- /dev/null\n+++ b/docs/SPEC-0003-blocked.md\n@@\n+# SPEC-0003 Blocked\n+\n+Implementation for SPEC-0003 remains blocked because the necessary specification\n+details were not included in the provided context bundle. Without the spec it is\n+impossible to determine the required behavior changes.\n```"
+          }
+        ]
+      }
+    }
+  ],
+  "implementationArtifacts": [
+    {
+      "runId": "a85c12a5-24c1-47a0-bfd4-f1a387f33385",
+      "taskId": "c3cd7399-860d-40f5-aa5e-e40478dbd67c",
+      "prNumber": 3,
+      "prUrl": "https://github.com/briancavalier/artillery/pull/3",
+      "branch": "codex/implement-spec-0003",
+      "commitSha": "c8144e3673c97dca79b539a39f2ee20a985ecd17",
+      "filesChanged": [
+        "docs/SPEC-0003-blocked.md"
+      ],
+      "testSummary": {
+        "passed": 3,
+        "failed": 0,
+        "command": "npm test && npm run contract:check && npm run policy:check"
+      },
+      "evidenceRefs": [
+        "/home/runner/work/artillery/artillery/evidence/SPEC-0003/SCN-0301.json",
+        "/home/runner/work/artillery/artillery/evidence/SPEC-0003/SCN-0302.json",
+        "/home/runner/work/artillery/artillery/evidence/SPEC-0003/SCN-0303.json",
+        "/home/runner/work/artillery/artillery/evidence/SPEC-0003/SCN-0304.json"
+      ],
+      "summaryMd": "Documented missing SPEC-0003 specification details as a blocker.",
+      "metadata": {}
+    }
+  ]
+}
