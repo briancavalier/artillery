@@ -50,8 +50,7 @@ jobs:
         run: npm run factory:spec-execution
       - name: Refresh main after implementation merges
         run: |
-          git checkout main
-          git pull --ff-only origin main
+          git pull --rebase --autostash origin main
       - name: Commit spec/evidence updates
         run: |
           if git diff --quiet -- specs evidence reports/spec-execution reports/implementation-context var/factory/state.json; then
