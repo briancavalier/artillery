@@ -1,5 +1,261 @@
 {
   "events": [],
+  "architectureTasks": [
+    {
+      "taskId": "c3a2787d-4185-4525-9add-2f8ae02d5548",
+      "specId": "SPEC-0003",
+      "source": "human",
+      "owner": "@briancavalier",
+      "repo": "briancavalier/artillery",
+      "baseBranch": "main",
+      "baseSha": "68d73e5e9574e014e8fdabf09d71b89e6e7315a7",
+      "targetBranch": "codex/architect-spec-0003",
+      "artifactRoot": "architecture/SPEC-0003",
+      "contextBundleRef": "/home/runner/work/artillery/artillery/reports/architecture-context/SPEC-0003.md",
+      "attempt": 0,
+      "priority": 100,
+      "limits": {
+        "maxDurationMs": 900000,
+        "maxCostUsd": 5
+      },
+      "policy": {
+        "allowAutoMerge": true,
+        "blockedPaths": [
+          "apps/factory-api/**",
+          "packages/factory-core/**",
+          "packages/factory-runner/**",
+          "packages/implementation-provider-codex/**",
+          "apps/artillery-game/**",
+          "tests/**",
+          ".github/workflows/**",
+          "policy/**",
+          ".env*",
+          "render.yaml"
+        ]
+      },
+      "status": "merged",
+      "createdAt": "2026-03-09T23:29:11.210Z",
+      "updatedAt": "2026-03-09T23:30:55.114Z",
+      "runId": "8f608ae5-fcad-43c2-a51d-717924c8e4d1",
+      "provider": "openai-codex-architect",
+      "model": "gpt-5-codex",
+      "prNumber": 5,
+      "prUrl": "https://github.com/briancavalier/artillery/pull/5",
+      "branch": "codex/architect-spec-0003"
+    }
+  ],
+  "architectureRuns": [
+    {
+      "runId": "8f608ae5-fcad-43c2-a51d-717924c8e4d1",
+      "taskId": "c3a2787d-4185-4525-9add-2f8ae02d5548",
+      "provider": "openai-codex-architect",
+      "model": "gpt-5-codex",
+      "status": "completed",
+      "startedAt": "2026-03-09T23:29:11.215Z",
+      "usage": {
+        "inputTokens": 22525,
+        "outputTokens": 7633,
+        "estimatedCostUsd": 0.104486
+      },
+      "finishedAt": "2026-03-09T23:30:07.112Z",
+      "result": "pr_opened",
+      "traceId": "resp_01a2286186c627d30069af57c898ac819d92b62efd565d0d45",
+      "summary": "# SPEC-0003 Architecture Overview\n\n## Goals\n- Upgrade terrain fidelity so every match starts on a natural-looking, high-resolution battlefield while guaranteeing fair, stable player spawns (SCN-0301).\n- Preserve deterministic behaviour across simulation, replay, and verification when high-resolution terrain and crater mutations are involved (SCN-0302).\n- Deliver smooth, localized deformation that players can reason about for subsequent shots (SCN-0303).\n- Maintain fast match start and responsive turn loops under expected concurrency despite increased terrain work (SCN-0304).\n\n## Current State\n- `createInitialState` in `apps/artillery-game/src/shared/simulation.ts` generates a 64-sample array via a simple RNG loop; spawns are hard-coded at x=80 and x=560 without slope checks.\n- Projectile resolution only adjusts player health; terrain remains static.\n- Determinism relies on pure functions with seeded RNG, `hashState`, and replay tests (`tests/determinism.test.ts`).\n- No dedicated instrumentation guards match start or turn processing latency.\n\n## Proposed Data Model Changes\n- Introduce a `TerrainSurface` structure stored on `MatchState.terrain`:\n  ```ts\n  interface TerrainSurface {\n    sampleCount: number;            // e.g., 512\n    spacing: number;                // world units per sample\n    heights: number[];              // ground height per sample (integers)\n    seed: number;                   // seed used for generation\n    version: number;                // increments per deformation\n    spawnSlots: Array<{\n      x: number;                    // world coordinate\n      sampleIndex: number;\n      slope: number;                // absolute slope for stability checks\n      occupiedBy?: string;          // playerId when assigned\n    }>;\n    metrics: {\n      variationScore: number;       // normalized std-dev used to assert variety\n      ridgeCount: number;\n      valleyCount: number;\n      flatPocketCount: number;\n    };\n  }\n  ```\n- Preserve `MatchState.terrain` as part of `publicState`; clients and evidence tooling consume the richer contract.\n\n## Terrain Generation Pipeline (`shared/terrain/generator.ts`)\n1. **Noise synthesis**: Use the existing xorshift RNG seeded from `MatchState.seed` to generate multi-octave noise (e.g., 4 octaves, persistence 0.55) for `sampleCount = 512` samples.\n2. **Shape control**: Apply envelope curves (coarse ridge shaping + valley smoothing) to avoid monotonous slopes and to introduce prominent silhouettes.\n3. **Normalization**: Clamp heights within `[groundMin, groundMax]` (e.g., 40–220 world units) and round to integers to keep deterministic hashing simple.\n4. **Feature metrics**: Classify samples into ridge/valley/flat buckets via slope and curvature heuristics; compute `variationScore` and counts for verification gating.\n5. **Spawn discovery**: Scan for contiguous windows meeting stability requirements (`slope <= 0.2`, clearance >= 16 world units) and record viable `spawnSlots`. Guarantee at least two slots by re-shaping locally if necessary.\n6. Return a `TerrainSurface` plus RNG tail state. `createInitialState` stores the surface and carries forward the RNG state for wind.\n\n## Spawn Placement (`simulation.ts`)\n- Replace hard-coded x-positions with slot selection:\n  - On `addPlayer`, pull the next unused `spawnSlots` entry, mark `occupiedBy`, and align player `x` to slot `x`.\n  - If no slot exists (should not happen), fall back to deterministic default and log a ledger event for monitoring.\n- When publishing `publicState`, include `terrain.spawnSlots` with `occupiedBy` redacted (`occupiedBy` replaced by boolean flags) to avoid leaking IDs if required.\n\n## Terrain Deformation (`shared/terrain/crater.ts`)\n- Provide `applyCrater(surface, impactX, options)` returning a new `heights` array and metadata:\n  - Convert world `impactX` to sample index using `spacing`.\n  - Affect samples within `radiusSamples` using a cubic falloff curve (C1 continuity) to ensure smooth rims.\n  - Maintain floor and ceiling bounds.\n  - Update `surface.version += 1` and append deformation summary (radius, depth, affected range) used by evidence hooks.\n- `resolveProjectile` should return impact meta (exact x, affected indices, damage) and the crater summary, to include in the `ProjectileResolved` event payload.\n\n## Simulation Flow Adjustments\n- `createInitialState`: call `generateTerrain(seed)`, store returned `TerrainSurface`, and keep the RNG state for wind separate.\n- `resolveProjectile`: after computing impact location and damage, call `applyCrater` to mutate terrain, update `MatchState.terrain`, and include deformation metadata in events.\n- Ensure `publicState` exposes `terrain.version` and `heights` so clients can redraw efficiently.\n\n## Client Rendering (`client/main.ts`)\n- Derive pixel spacing from `surface.spacing` to render 512-sample terrain smoothly.\n- Use `terrain.version` to gate re-render updates and optionally animate crater smoothing (e.g., highlight recent impact zone).\n\n## Determinism & Replay\n- All terrain generation/deformation functions must be pure and accept explicit seeds/parameters.\n- Maintain simple `number[]` for heights to keep `stableStringify` effective (no typed arrays).\n- Extend `tests/determinism.test.ts` to include crater mutations and assert identical hashes and `terrain.version` across runs.\n- Update `packages/project-adapter-artillery/src/evidence.ts` to bake scenario-specific verifiers once the terrain metadata is exposed.\n\n## Performance Guardrails\n- Instrument `MatchStore.createMatch` to capture terrain generation latency and ensure it stays under the agreed budget (e.g., <5ms median in perf tests).\n- Track `applyCommand` latency for `fire` commands separately, logging crater application cost (SCN-0304 evidence hook).\n- Add `tests/performance-terrain.test.ts` using fake timers or benchmark harness to assert budgets in CI.\n\n## Scenario Coverage Mapping\n- **SCN-0301**: Variation metrics + spawn slot validation enforced in terrain generator; tests assert ridge/valley counts and spawn stability.\n- **SCN-0302**: Determinism test and evidence harness hash the entire `TerrainSurface` after scripted command sequences.\n- **SCN-0303**: Crater module unit tests validate smoothness and locality; simulation emits deformation metadata for replay.\n- **SCN-0304**: Performance tests and ledger metrics ensure start/turn latencies remain within thresholds.\n\n## Risks & Mitigations\n- **Fairness regression**: enforce spawn stability validators and fail-fast if insufficient slots; add evidence snapshots to visual baselines.\n- **Determinism drift**: avoid non-deterministic math (no Math.random, Date.now) in terrain flow; centralize RNG usage.\n- **Performance degradation**: align algorithms to O(n) over sample count, reuse buffers if necessary, and profile in CI.\n- **Network payload growth**: consider compressing terrain deltas (version + affected indices) if SSE payloads grow; initial implementation can send full array but measure size.\n",
+      "metadata": {
+        "selectedContextFiles": [
+          "apps/artillery-game/src/server/match-store.ts",
+          "apps/artillery-game/src/shared/determinism.ts",
+          "apps/artillery-game/src/shared/simulation.ts",
+          "evidence/SPEC-0003/README.md",
+          "packages/project-adapter-artillery/src/evidence.ts",
+          "tests/determinism.test.ts",
+          "tests/protocol.test.ts",
+          "apps/artillery-game/src/client/main.ts",
+          "apps/artillery-game/src/server/http.ts",
+          "apps/artillery-game/src/shared/types.ts",
+          "specs/SPEC-0003.json",
+          "evidence/SPEC-0003/SCN-0301.json",
+          "evidence/SPEC-0003/SCN-0302.json",
+          "evidence/SPEC-0003/SCN-0303.json",
+          "evidence/SPEC-0003/SCN-0304.json",
+          "tests/boundary-policy.test.ts",
+          "tests/canary-thresholds.test.ts",
+          "tests/contracts.test.ts",
+          "tests/event-mode.test.ts",
+          "tests/factory-api-implementation.test.ts",
+          "tests/factory-api.test.ts",
+          "tests/helpers.ts",
+          "tests/implementation-provider-codex.test.ts",
+          "tests/implementation-provider-github.test.ts"
+        ],
+        "requestDiagnostics": {
+          "attempts": [],
+          "finalStatusCode": 200
+        },
+        "attempts": [
+          {
+            "attempt": 1,
+            "responseId": "resp_01a2286186c627d30069af57c898ac819d92b62efd565d0d45",
+            "repaired": false
+          }
+        ]
+      }
+    }
+  ],
+  "architectureArtifacts": [
+    {
+      "runId": "8f608ae5-fcad-43c2-a51d-717924c8e4d1",
+      "taskId": "c3a2787d-4185-4525-9add-2f8ae02d5548",
+      "prNumber": 5,
+      "prUrl": "https://github.com/briancavalier/artillery/pull/5",
+      "branch": "codex/architect-spec-0003",
+      "commitSha": "bddb96201e349b89d099951bb0718a6d948824cf",
+      "filesChanged": [
+        "architecture/SPEC-0003/README.md",
+        "architecture/SPEC-0003/integration-points.json",
+        "architecture/SPEC-0003/invariants.json",
+        "architecture/SPEC-0003/scenario-trace.json"
+      ],
+      "summaryMd": "# SPEC-0003 Architecture Overview\n\n## Goals\n- Upgrade terrain fidelity so every match starts on a natural-looking, high-resolution battlefield while guaranteeing fair, stable player spawns (SCN-0301).\n- Preserve deterministic behaviour across simulation, replay, and verification when high-resolution terrain and crater mutations are involved (SCN-0302).\n- Deliver smooth, localized deformation that players can reason about for subsequent shots (SCN-0303).\n- Maintain fast match start and responsive turn loops under expected concurrency despite increased terrain work (SCN-0304).\n\n## Current State\n- `createInitialState` in `apps/artillery-game/src/shared/simulation.ts` generates a 64-sample array via a simple RNG loop; spawns are hard-coded at x=80 and x=560 without slope checks.\n- Projectile resolution only adjusts player health; terrain remains static.\n- Determinism relies on pure functions with seeded RNG, `hashState`, and replay tests (`tests/determinism.test.ts`).\n- No dedicated instrumentation guards match start or turn processing latency.\n\n## Proposed Data Model Changes\n- Introduce a `TerrainSurface` structure stored on `MatchState.terrain`:\n  ```ts\n  interface TerrainSurface {\n    sampleCount: number;            // e.g., 512\n    spacing: number;                // world units per sample\n    heights: number[];              // ground height per sample (integers)\n    seed: number;                   // seed used for generation\n    version: number;                // increments per deformation\n    spawnSlots: Array<{\n      x: number;                    // world coordinate\n      sampleIndex: number;\n      slope: number;                // absolute slope for stability checks\n      occupiedBy?: string;          // playerId when assigned\n    }>;\n    metrics: {\n      variationScore: number;       // normalized std-dev used to assert variety\n      ridgeCount: number;\n      valleyCount: number;\n      flatPocketCount: number;\n    };\n  }\n  ```\n- Preserve `MatchState.terrain` as part of `publicState`; clients and evidence tooling consume the richer contract.\n\n## Terrain Generation Pipeline (`shared/terrain/generator.ts`)\n1. **Noise synthesis**: Use the existing xorshift RNG seeded from `MatchState.seed` to generate multi-octave noise (e.g., 4 octaves, persistence 0.55) for `sampleCount = 512` samples.\n2. **Shape control**: Apply envelope curves (coarse ridge shaping + valley smoothing) to avoid monotonous slopes and to introduce prominent silhouettes.\n3. **Normalization**: Clamp heights within `[groundMin, groundMax]` (e.g., 40–220 world units) and round to integers to keep deterministic hashing simple.\n4. **Feature metrics**: Classify samples into ridge/valley/flat buckets via slope and curvature heuristics; compute `variationScore` and counts for verification gating.\n5. **Spawn discovery**: Scan for contiguous windows meeting stability requirements (`slope <= 0.2`, clearance >= 16 world units) and record viable `spawnSlots`. Guarantee at least two slots by re-shaping locally if necessary.\n6. Return a `TerrainSurface` plus RNG tail state. `createInitialState` stores the surface and carries forward the RNG state for wind.\n\n## Spawn Placement (`simulation.ts`)\n- Replace hard-coded x-positions with slot selection:\n  - On `addPlayer`, pull the next unused `spawnSlots` entry, mark `occupiedBy`, and align player `x` to slot `x`.\n  - If no slot exists (should not happen), fall back to deterministic default and log a ledger event for monitoring.\n- When publishing `publicState`, include `terrain.spawnSlots` with `occupiedBy` redacted (`occupiedBy` replaced by boolean flags) to avoid leaking IDs if required.\n\n## Terrain Deformation (`shared/terrain/crater.ts`)\n- Provide `applyCrater(surface, impactX, options)` returning a new `heights` array and metadata:\n  - Convert world `impactX` to sample index using `spacing`.\n  - Affect samples within `radiusSamples` using a cubic falloff curve (C1 continuity) to ensure smooth rims.\n  - Maintain floor and ceiling bounds.\n  - Update `surface.version += 1` and append deformation summary (radius, depth, affected range) used by evidence hooks.\n- `resolveProjectile` should return impact meta (exact x, affected indices, damage) and the crater summary, to include in the `ProjectileResolved` event payload.\n\n## Simulation Flow Adjustments\n- `createInitialState`: call `generateTerrain(seed)`, store returned `TerrainSurface`, and keep the RNG state for wind separate.\n- `resolveProjectile`: after computing impact location and damage, call `applyCrater` to mutate terrain, update `MatchState.terrain`, and include deformation metadata in events.\n- Ensure `publicState` exposes `terrain.version` and `heights` so clients can redraw efficiently.\n\n## Client Rendering (`client/main.ts`)\n- Derive pixel spacing from `surface.spacing` to render 512-sample terrain smoothly.\n- Use `terrain.version` to gate re-render updates and optionally animate crater smoothing (e.g., highlight recent impact zone).\n\n## Determinism & Replay\n- All terrain generation/deformation functions must be pure and accept explicit seeds/parameters.\n- Maintain simple `number[]` for heights to keep `stableStringify` effective (no typed arrays).\n- Extend `tests/determinism.test.ts` to include crater mutations and assert identical hashes and `terrain.version` across runs.\n- Update `packages/project-adapter-artillery/src/evidence.ts` to bake scenario-specific verifiers once the terrain metadata is exposed.\n\n## Performance Guardrails\n- Instrument `MatchStore.createMatch` to capture terrain generation latency and ensure it stays under the agreed budget (e.g., <5ms median in perf tests).\n- Track `applyCommand` latency for `fire` commands separately, logging crater application cost (SCN-0304 evidence hook).\n- Add `tests/performance-terrain.test.ts` using fake timers or benchmark harness to assert budgets in CI.\n\n## Scenario Coverage Mapping\n- **SCN-0301**: Variation metrics + spawn slot validation enforced in terrain generator; tests assert ridge/valley counts and spawn stability.\n- **SCN-0302**: Determinism test and evidence harness hash the entire `TerrainSurface` after scripted command sequences.\n- **SCN-0303**: Crater module unit tests validate smoothness and locality; simulation emits deformation metadata for replay.\n- **SCN-0304**: Performance tests and ledger metrics ensure start/turn latencies remain within thresholds.\n\n## Risks & Mitigations\n- **Fairness regression**: enforce spawn stability validators and fail-fast if insufficient slots; add evidence snapshots to visual baselines.\n- **Determinism drift**: avoid non-deterministic math (no Math.random, Date.now) in terrain flow; centralize RNG usage.\n- **Performance degradation**: align algorithms to O(n) over sample count, reuse buffers if necessary, and profile in CI.\n- **Network payload growth**: consider compressing terrain deltas (version + affected indices) if SSE payloads grow; initial implementation can send full array but measure size.\n",
+      "payload": {
+        "readme": "# SPEC-0003 Architecture Overview\n\n## Goals\n- Upgrade terrain fidelity so every match starts on a natural-looking, high-resolution battlefield while guaranteeing fair, stable player spawns (SCN-0301).\n- Preserve deterministic behaviour across simulation, replay, and verification when high-resolution terrain and crater mutations are involved (SCN-0302).\n- Deliver smooth, localized deformation that players can reason about for subsequent shots (SCN-0303).\n- Maintain fast match start and responsive turn loops under expected concurrency despite increased terrain work (SCN-0304).\n\n## Current State\n- `createInitialState` in `apps/artillery-game/src/shared/simulation.ts` generates a 64-sample array via a simple RNG loop; spawns are hard-coded at x=80 and x=560 without slope checks.\n- Projectile resolution only adjusts player health; terrain remains static.\n- Determinism relies on pure functions with seeded RNG, `hashState`, and replay tests (`tests/determinism.test.ts`).\n- No dedicated instrumentation guards match start or turn processing latency.\n\n## Proposed Data Model Changes\n- Introduce a `TerrainSurface` structure stored on `MatchState.terrain`:\n  ```ts\n  interface TerrainSurface {\n    sampleCount: number;            // e.g., 512\n    spacing: number;                // world units per sample\n    heights: number[];              // ground height per sample (integers)\n    seed: number;                   // seed used for generation\n    version: number;                // increments per deformation\n    spawnSlots: Array<{\n      x: number;                    // world coordinate\n      sampleIndex: number;\n      slope: number;                // absolute slope for stability checks\n      occupiedBy?: string;          // playerId when assigned\n    }>;\n    metrics: {\n      variationScore: number;       // normalized std-dev used to assert variety\n      ridgeCount: number;\n      valleyCount: number;\n      flatPocketCount: number;\n    };\n  }\n  ```\n- Preserve `MatchState.terrain` as part of `publicState`; clients and evidence tooling consume the richer contract.\n\n## Terrain Generation Pipeline (`shared/terrain/generator.ts`)\n1. **Noise synthesis**: Use the existing xorshift RNG seeded from `MatchState.seed` to generate multi-octave noise (e.g., 4 octaves, persistence 0.55) for `sampleCount = 512` samples.\n2. **Shape control**: Apply envelope curves (coarse ridge shaping + valley smoothing) to avoid monotonous slopes and to introduce prominent silhouettes.\n3. **Normalization**: Clamp heights within `[groundMin, groundMax]` (e.g., 40–220 world units) and round to integers to keep deterministic hashing simple.\n4. **Feature metrics**: Classify samples into ridge/valley/flat buckets via slope and curvature heuristics; compute `variationScore` and counts for verification gating.\n5. **Spawn discovery**: Scan for contiguous windows meeting stability requirements (`slope <= 0.2`, clearance >= 16 world units) and record viable `spawnSlots`. Guarantee at least two slots by re-shaping locally if necessary.\n6. Return a `TerrainSurface` plus RNG tail state. `createInitialState` stores the surface and carries forward the RNG state for wind.\n\n## Spawn Placement (`simulation.ts`)\n- Replace hard-coded x-positions with slot selection:\n  - On `addPlayer`, pull the next unused `spawnSlots` entry, mark `occupiedBy`, and align player `x` to slot `x`.\n  - If no slot exists (should not happen), fall back to deterministic default and log a ledger event for monitoring.\n- When publishing `publicState`, include `terrain.spawnSlots` with `occupiedBy` redacted (`occupiedBy` replaced by boolean flags) to avoid leaking IDs if required.\n\n## Terrain Deformation (`shared/terrain/crater.ts`)\n- Provide `applyCrater(surface, impactX, options)` returning a new `heights` array and metadata:\n  - Convert world `impactX` to sample index using `spacing`.\n  - Affect samples within `radiusSamples` using a cubic falloff curve (C1 continuity) to ensure smooth rims.\n  - Maintain floor and ceiling bounds.\n  - Update `surface.version += 1` and append deformation summary (radius, depth, affected range) used by evidence hooks.\n- `resolveProjectile` should return impact meta (exact x, affected indices, damage) and the crater summary, to include in the `ProjectileResolved` event payload.\n\n## Simulation Flow Adjustments\n- `createInitialState`: call `generateTerrain(seed)`, store returned `TerrainSurface`, and keep the RNG state for wind separate.\n- `resolveProjectile`: after computing impact location and damage, call `applyCrater` to mutate terrain, update `MatchState.terrain`, and include deformation metadata in events.\n- Ensure `publicState` exposes `terrain.version` and `heights` so clients can redraw efficiently.\n\n## Client Rendering (`client/main.ts`)\n- Derive pixel spacing from `surface.spacing` to render 512-sample terrain smoothly.\n- Use `terrain.version` to gate re-render updates and optionally animate crater smoothing (e.g., highlight recent impact zone).\n\n## Determinism & Replay\n- All terrain generation/deformation functions must be pure and accept explicit seeds/parameters.\n- Maintain simple `number[]` for heights to keep `stableStringify` effective (no typed arrays).\n- Extend `tests/determinism.test.ts` to include crater mutations and assert identical hashes and `terrain.version` across runs.\n- Update `packages/project-adapter-artillery/src/evidence.ts` to bake scenario-specific verifiers once the terrain metadata is exposed.\n\n## Performance Guardrails\n- Instrument `MatchStore.createMatch` to capture terrain generation latency and ensure it stays under the agreed budget (e.g., <5ms median in perf tests).\n- Track `applyCommand` latency for `fire` commands separately, logging crater application cost (SCN-0304 evidence hook).\n- Add `tests/performance-terrain.test.ts` using fake timers or benchmark harness to assert budgets in CI.\n\n## Scenario Coverage Mapping\n- **SCN-0301**: Variation metrics + spawn slot validation enforced in terrain generator; tests assert ridge/valley counts and spawn stability.\n- **SCN-0302**: Determinism test and evidence harness hash the entire `TerrainSurface` after scripted command sequences.\n- **SCN-0303**: Crater module unit tests validate smoothness and locality; simulation emits deformation metadata for replay.\n- **SCN-0304**: Performance tests and ledger metrics ensure start/turn latencies remain within thresholds.\n\n## Risks & Mitigations\n- **Fairness regression**: enforce spawn stability validators and fail-fast if insufficient slots; add evidence snapshots to visual baselines.\n- **Determinism drift**: avoid non-deterministic math (no Math.random, Date.now) in terrain flow; centralize RNG usage.\n- **Performance degradation**: align algorithms to O(n) over sample count, reuse buffers if necessary, and profile in CI.\n- **Network payload growth**: consider compressing terrain deltas (version + affected indices) if SSE payloads grow; initial implementation can send full array but measure size.\n",
+        "integrationPoints": [
+          {
+            "path": "apps/artillery-game/src/shared/simulation.ts",
+            "role": "Integrate TerrainSurface into match lifecycle (generation, spawn placement, crater updates).",
+            "writeIntent": "modify",
+            "priority": 1
+          },
+          {
+            "path": "apps/artillery-game/src/shared/types.ts",
+            "role": "Define TerrainSurface contract and extend MatchState/public state types.",
+            "writeIntent": "modify",
+            "priority": 2
+          },
+          {
+            "path": "apps/artillery-game/src/shared/terrain/generator.ts",
+            "role": "Pure terrain generation module producing high-resolution heights, metrics, and spawn slots.",
+            "writeIntent": "create",
+            "priority": 3
+          },
+          {
+            "path": "apps/artillery-game/src/shared/terrain/crater.ts",
+            "role": "Encapsulate crater deformation logic with smooth falloff and metadata output.",
+            "writeIntent": "create",
+            "priority": 4
+          },
+          {
+            "path": "apps/artillery-game/src/shared/terrain/index.ts",
+            "role": "Export terrain utilities (generator, crater, helpers) for simulation and tests.",
+            "writeIntent": "create",
+            "priority": 5
+          },
+          {
+            "path": "apps/artillery-game/src/client/main.ts",
+            "role": "Render high-resolution terrain and respond to terrain.version updates for smooth UX.",
+            "writeIntent": "modify",
+            "priority": 6
+          },
+          {
+            "path": "apps/artillery-game/src/server/match-store.ts",
+            "role": "Capture performance metrics for terrain generation/updates and surface them via ledger events.",
+            "writeIntent": "modify",
+            "priority": 7
+          },
+          {
+            "path": "tests/terrain-playability.test.ts",
+            "role": "Validate terrain variation metrics and spawn slot stability for SCN-0301.",
+            "writeIntent": "create",
+            "priority": 8
+          },
+          {
+            "path": "tests/terrain-deformation.test.ts",
+            "role": "Assert crater smoothness/locality and deformation metadata for SCN-0303.",
+            "writeIntent": "create",
+            "priority": 9
+          },
+          {
+            "path": "tests/performance-terrain.test.ts",
+            "role": "Exercise terrain generation and crater application against latency budgets for SCN-0304.",
+            "writeIntent": "create",
+            "priority": 10
+          },
+          {
+            "path": "tests/determinism.test.ts",
+            "role": "Extend replay hash coverage to include TerrainSurface.version and deformation history for SCN-0302.",
+            "writeIntent": "modify",
+            "priority": 11
+          },
+          {
+            "path": "packages/project-adapter-artillery/src/evidence.ts",
+            "role": "Wire scenario verifiers to new terrain metadata and performance metrics for automated evidence capture.",
+            "writeIntent": "modify",
+            "priority": 12
+          }
+        ],
+        "invariants": [
+          "MatchState.terrain.surface.heights.length must equal MatchState.terrain.surface.sampleCount (default 512) after generation and after every deformation.",
+          "MatchState.terrain.surface.metrics must report variationScore >= 0.15 and have ridgeCount, valleyCount, and flatPocketCount all >= 1 to guarantee visible variety at match start.",
+          "Each entry in MatchState.terrain.surface.spawnSlots must maintain |slope| <= 0.2 and be marked occupiedBy only by addPlayer; no two players share the same slot.",
+          "applyCrater() may only mutate heights within the computed impact radius and must keep every height within [groundMin, groundMax] bounds.",
+          "TerrainSurface.version increments by exactly one per deformation and is included in publicState so replay hashes can enforce determinism.",
+          "Terrain generation plus first turn setup must complete within the performance budget (e.g., <5ms for buildTerrain, <10ms for fire-command crater) as recorded in MatchStore latency telemetry."
+        ],
+        "scenarioTrace": [
+          {
+            "scenarioId": "SCN-0301",
+            "filePaths": [
+              "apps/artillery-game/src/shared/terrain/generator.ts",
+              "apps/artillery-game/src/shared/simulation.ts",
+              "tests/terrain-playability.test.ts"
+            ],
+            "evidenceHooks": [
+              "playability:spawnValidation",
+              "visual-baseline:terrainSilhouette"
+            ]
+          },
+          {
+            "scenarioId": "SCN-0302",
+            "filePaths": [
+              "apps/artillery-game/src/shared/terrain/generator.ts",
+              "apps/artillery-game/src/shared/terrain/crater.ts",
+              "tests/determinism.test.ts",
+              "packages/project-adapter-artillery/src/evidence.ts"
+            ],
+            "evidenceHooks": [
+              "determinism:terrainStateHash",
+              "replay:commandLedger"
+            ]
+          },
+          {
+            "scenarioId": "SCN-0303",
+            "filePaths": [
+              "apps/artillery-game/src/shared/terrain/crater.ts",
+              "apps/artillery-game/src/shared/simulation.ts",
+              "tests/terrain-deformation.test.ts"
+            ],
+            "evidenceHooks": [
+              "physics-regression:impactSweep",
+              "visual-baseline:craterProfiles"
+            ]
+          },
+          {
+            "scenarioId": "SCN-0304",
+            "filePaths": [
+              "apps/artillery-game/src/server/match-store.ts",
+              "apps/artillery-game/src/shared/terrain/generator.ts",
+              "tests/performance-terrain.test.ts"
+            ],
+            "evidenceHooks": [
+              "performance:matchStartBudget",
+              "canary:turnLatency"
+            ]
+          }
+        ]
+      },
+      "metadata": {}
+    }
+  ],
   "implementationTasks": [
     {
       "taskId": "c3cd7399-860d-40f5-aa5e-e40478dbd67c",
