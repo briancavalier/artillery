@@ -34,16 +34,16 @@ const task: ImplementationTask = {
   updatedAt: new Date().toISOString()
 };
 
-test("validatePatchText rejects non-diff patch content", () => {
+test("checkPatchText rejects non-diff patch content", () => {
   const invalid = "const terrain = generateTerrain();";
   assert.equal(codexProviderInternals.isLikelyUnifiedDiff(invalid), false);
-  assert.equal(
-    codexProviderInternals.validatePatchText(invalid),
-    "Codex returned PATCH content that is not a valid unified diff."
-  );
+  assert.deepEqual(codexProviderInternals.checkPatchText(invalid), {
+    kind: "format",
+    message: "Codex returned PATCH content that is not a valid unified diff."
+  });
 });
 
-test("validatePatchText accepts plausible unified diff", () => {
+test("checkPatchText accepts plausible unified diff", () => {
   const patch = [
     "diff --git a/apps/artillery-game/src/shared/simulation.ts b/apps/artillery-game/src/shared/simulation.ts",
     "--- a/apps/artillery-game/src/shared/simulation.ts",
@@ -53,7 +53,7 @@ test("validatePatchText accepts plausible unified diff", () => {
     "+const value = 2;"
   ].join("\n");
   assert.equal(codexProviderInternals.isLikelyUnifiedDiff(patch), true);
-  assert.equal(codexProviderInternals.validatePatchText(patch), "");
+  assert.deepEqual(codexProviderInternals.checkPatchText(patch), { kind: "ok", message: "" });
 });
 
 test("renderRepairPrompt includes validation feedback and prior output", () => {
@@ -66,4 +66,38 @@ test("renderRepairPrompt includes validation feedback and prior output", () => {
   assert.match(prompt, /Validation error: Codex returned PATCH content that is not a valid unified diff\./);
   assert.match(prompt, /Previous invalid output:/);
   assert.match(prompt, /Allowed paths: apps\/artillery-game\/\*\*, tests\/\*\*\./);
+});
+
+test("extractPatchedPaths returns touched files from unified diff", () => {
+  const patch = [
+    "diff --git a/README.md b/README.md",
+    "--- a/README.md",
+    "+++ b/README.md",
+    "@@",
+    "-old",
+    "+new",
+    "diff --git a/apps/artillery-game/src/shared/simulation.ts b/apps/artillery-game/src/shared/simulation.ts",
+    "--- a/apps/artillery-game/src/shared/simulation.ts",
+    "+++ b/apps/artillery-game/src/shared/simulation.ts",
+    "@@",
+    "-const value = 1;",
+    "+const value = 2;"
+  ].join("\n");
+  assert.deepEqual(codexProviderInternals.extractPatchedPaths(patch), [
+    "README.md",
+    "apps/artillery-game/src/shared/simulation.ts"
+  ]);
+});
+
+test("renderApplyRepairPrompt includes apply error and file snapshots", () => {
+  const prompt = codexProviderInternals.renderApplyRepairPrompt(
+    task,
+    "# Context bundle",
+    "SUMMARY:\nI changed files.\nPATCH:\n```diff\n...\n```",
+    "error: patch failed: README.md:1",
+    "FILE: README.md\n```\ncurrent contents\n```"
+  );
+  assert.match(prompt, /git apply error: error: patch failed: README\.md:1/);
+  assert.match(prompt, /Current file snapshots for the touched files:/);
+  assert.match(prompt, /Do not modify unrelated files such as README\.md unless the spec explicitly requires it\./);
 });

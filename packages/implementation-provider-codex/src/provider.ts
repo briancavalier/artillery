@@ -39,8 +39,14 @@ interface AttemptDiagnostic {
   attempt: number;
   responseId?: string;
   repair: boolean;
+  repairKind?: "format" | "apply";
   validationError?: string;
   rawOutputPreview: string;
+}
+
+interface PatchCheckResult {
+  kind: "ok" | "format" | "apply";
+  message: string;
 }
 
 export class CodexImplementationProvider implements ImplementationProvider {
@@ -96,33 +102,44 @@ export class CodexImplementationProvider implements ImplementationProvider {
       const attempts: AttemptDiagnostic[] = [];
       const summaryPath = join(worktreePath, "reports", "implementation", `${task.specId}.md`);
       let parsed: ParsedCodexResponse | null = null;
-      let validationError = "";
+      let patchCheck: PatchCheckResult = { kind: "format", message: "" };
 
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
-        const repair = attempt > 1;
-        parsed = await requestCodexResponse(apiKey, task, branch, repair
-          ? renderRepairPrompt(task, contextText, attempts.at(-1)?.rawOutputPreview ?? "", validationError)
-          : renderUserPrompt(task, contextText)
-        );
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const lastAttempt = attempts.at(-1);
+        const repairKind = attempt === 1 ? undefined : (patchCheck.kind === "apply" ? "apply" : "format");
+        const prompt = attempt === 1
+          ? renderUserPrompt(task, contextText)
+          : repairKind === "apply"
+            ? renderApplyRepairPrompt(
+                task,
+                contextText,
+                lastAttempt?.rawOutputPreview ?? "",
+                patchCheck.message,
+                await buildFileSnapshots(worktreePath, extractPatchedPaths(parsed?.patch ?? ""))
+              )
+            : renderRepairPrompt(task, contextText, lastAttempt?.rawOutputPreview ?? "", patchCheck.message);
+
+        parsed = await requestCodexResponse(apiKey, task, branch, prompt);
         const rawOutputPath = join(worktreePath, "reports", "implementation", `${task.specId}.attempt-${attempt}.txt`);
         await writeFile(rawOutputPath, `${parsed.rawText}\n`, "utf8");
 
-        validationError = validatePatchText(parsed.patch);
-        if (!validationError) {
+        patchCheck = checkPatchText(parsed.patch);
+        if (patchCheck.kind === "ok") {
           const patchPath = join(worktreePath, ".darkfactory.patch");
           await writeFile(patchPath, `${parsed.patch}\n`, "utf8");
-          validationError = await validatePatchWithGit(worktreePath, patchPath);
+          patchCheck = await validatePatchWithGit(worktreePath, patchPath);
         }
 
         attempts.push({
           attempt,
           responseId: parsed.responseId,
-          repair,
-          validationError: validationError || undefined,
+          repair: attempt > 1,
+          repairKind,
+          validationError: patchCheck.kind === "ok" ? undefined : patchCheck.message,
           rawOutputPreview: truncate(parsed.rawText, 2000)
         });
 
-        if (!validationError) {
+        if (patchCheck.kind === "ok") {
           break;
         }
       }
@@ -133,19 +150,19 @@ export class CodexImplementationProvider implements ImplementationProvider {
 
       await writeFile(summaryPath, `${parsed.summary}\n`, "utf8");
 
-      if (validationError) {
+      if (patchCheck.kind !== "ok") {
         run = {
           ...run,
           status: "failed",
           finishedAt: new Date().toISOString(),
           result: "failed",
           traceId: parsed.responseId,
-          summary: validationError,
+          summary: patchCheck.message,
           usage: parsed.usage,
           metadata: {
             branch,
             phase: "provider_response",
-            reason: "invalid_patch",
+            reason: patchCheck.kind === "apply" ? "patch_does_not_apply" : "invalid_patch",
             attempts
           }
         };
@@ -346,6 +363,45 @@ function renderRepairPrompt(task: ImplementationTask, contextText: string, prior
   ].join("\n");
 }
 
+function renderApplyRepairPrompt(
+  task: ImplementationTask,
+  contextText: string,
+  priorOutput: string,
+  applyError: string,
+  fileSnapshots: string
+): string {
+  return [
+    `Your previous unified diff for ${task.specId} did not apply to the current repository state.`,
+    `git apply error: ${applyError}`,
+    "Return a corrected diff against the current file contents.",
+    "Do not explain the diff outside the required sections.",
+    "Return only:",
+    "SUMMARY:",
+    "<short explanation>",
+    "PATCH:",
+    "```diff",
+    "diff --git a/path/to/file b/path/to/file",
+    "--- a/path/to/file",
+    "+++ b/path/to/file",
+    "@@",
+    "<valid unified diff patch against the current file contents>",
+    "```",
+    "",
+    "Previous invalid output:",
+    priorOutput,
+    "",
+    "Current file snapshots for the touched files:",
+    fileSnapshots || "(No file snapshots available)",
+    "",
+    "Original context bundle:",
+    contextText,
+    "",
+    `Allowed paths: ${task.allowedPaths.join(", ")}.`,
+    `Blocked paths: ${task.policy.blockedPaths.join(", ")}.`,
+    "Do not modify unrelated files such as README.md unless the spec explicitly requires it."
+  ].join("\n");
+}
+
 async function requestCodexResponse(apiKey: string, task: ImplementationTask, branch: string, prompt: string): Promise<ParsedCodexResponse> {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -437,23 +493,27 @@ function extractPatch(text: string): string {
   return direct?.[1]?.trim() || "";
 }
 
-function validatePatchText(patch: string): string {
+function checkPatchText(patch: string): PatchCheckResult {
   if (!patch.trim()) {
-    return "Codex did not return a patch.";
+    return { kind: "format", message: "Codex did not return a patch." };
   }
   if (!isLikelyUnifiedDiff(patch)) {
-    return "Codex returned PATCH content that is not a valid unified diff.";
+    return { kind: "format", message: "Codex returned PATCH content that is not a valid unified diff." };
   }
-  return "";
+  return { kind: "ok", message: "" };
 }
 
-async function validatePatchWithGit(worktreePath: string, patchPath: string): Promise<string> {
+async function validatePatchWithGit(worktreePath: string, patchPath: string): Promise<PatchCheckResult> {
   try {
-    await execFileAsync("git", ["apply", "--check", patchPath], { cwd: worktreePath, env: process.env });
-    return "";
+    await execFileAsync("git", ["apply", "--check", "--verbose", patchPath], { cwd: worktreePath, env: process.env });
+    return { kind: "ok", message: "" };
   } catch (error) {
     const stderr = error instanceof Error && "stderr" in error ? String((error as { stderr?: string }).stderr ?? "") : "";
-    return stderr.trim() || (error instanceof Error ? error.message : String(error));
+    const message = stderr.trim() || (error instanceof Error ? error.message : String(error));
+    return {
+      kind: /patch does not apply|patch failed:/i.test(message) ? "apply" : "format",
+      message
+    };
   }
 }
 
@@ -473,6 +533,38 @@ function truncate(value: string, maxLength: number): string {
     return value;
   }
   return `${value.slice(0, maxLength)}...`;
+}
+
+function extractPatchedPaths(patch: string): string[] {
+  const paths = new Set<string>();
+  for (const match of patch.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)) {
+    const candidate = match[2] ?? match[1];
+    if (candidate && candidate !== "/dev/null") {
+      paths.add(candidate);
+    }
+  }
+  return [...paths];
+}
+
+async function buildFileSnapshots(worktreePath: string, paths: string[]): Promise<string> {
+  const snapshots: string[] = [];
+  for (const relativePath of paths.slice(0, 6)) {
+    try {
+      const contents = await readFile(join(worktreePath, relativePath), "utf8");
+      snapshots.push([
+        `FILE: ${relativePath}`,
+        "```",
+        truncate(contents, 6000),
+        "```"
+      ].join("\n"));
+    } catch {
+      snapshots.push([
+        `FILE: ${relativePath}`,
+        "(File does not exist in current checkout)"
+      ].join("\n"));
+    }
+  }
+  return snapshots.join("\n\n");
 }
 
 function estimateCost(inputTokens: number, outputTokens: number): number {
@@ -496,7 +588,9 @@ export const codexProviderInternals = {
   extractOutputText,
   extractSummary,
   extractPatch,
-  validatePatchText,
+  checkPatchText,
   isLikelyUnifiedDiff,
-  renderRepairPrompt
+  renderRepairPrompt,
+  renderApplyRepairPrompt,
+  extractPatchedPaths
 };
