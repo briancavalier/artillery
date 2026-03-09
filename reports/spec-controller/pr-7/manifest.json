@@ -1,0 +1,38 @@
+{
+  "version": "v1",
+  "generatedAt": "2026-03-09T01:01:33.205Z",
+  "mode": "act",
+  "repository": "owner/repo",
+  "prNumber": 7,
+  "headSha": "abc123def456",
+  "sameRepo": true,
+  "changedSpecPaths": [
+    "specs/SPEC-INT-1.json"
+  ],
+  "analyses": [
+    {
+      "specId": "SPEC-INT-1",
+      "path": "specs/SPEC-INT-1.json",
+      "currentStatus": "Deployed",
+      "nextStatus": "Deployed",
+      "changed": false,
+      "readiness": "ready-for-decision",
+      "score": 100,
+      "blockers": [],
+      "issues": []
+    }
+  ],
+  "autoUpdate": {
+    "attempted": true,
+    "updatedSpecIds": [],
+    "skippedReason": "No status changes were required."
+  },
+  "action": {
+    "result": "applied",
+    "message": "Applied factory/rollback to SPEC-INT-1 by maintainer at 2026-03-09T01:01:33.206Z.",
+    "label": "factory/rollback",
+    "actor": "maintainer",
+    "specId": "SPEC-INT-1",
+    "reason": "Canary regression"
+  }
+}
