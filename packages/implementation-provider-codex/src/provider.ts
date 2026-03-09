@@ -23,6 +23,26 @@ interface StoredRun {
   artifact: ImplementationArtifact | null;
 }
 
+interface ParsedCodexResponse {
+  responseId?: string;
+  rawText: string;
+  summary: string;
+  patch: string;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
+  };
+}
+
+interface AttemptDiagnostic {
+  attempt: number;
+  responseId?: string;
+  repair: boolean;
+  validationError?: string;
+  rawOutputPreview: string;
+}
+
 export class CodexImplementationProvider implements ImplementationProvider {
   private readonly runs = new Map<string, StoredRun>();
 
@@ -72,66 +92,61 @@ export class CodexImplementationProvider implements ImplementationProvider {
       await execGit(worktreePath, ["checkout", branch]);
 
       const contextText = await readContext(task.contextBundleRef);
-      const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: process.env.OPENAI_MODEL ?? "gpt-5-codex",
-          input: [
-            {
-              role: "system",
-              content: [{ type: "input_text", text: SYSTEM_PROMPT }]
-            },
-            {
-              role: "user",
-              content: [{ type: "input_text", text: renderUserPrompt(task, contextText) }]
-            }
-          ],
-          text: { format: { type: "text" } },
-          metadata: {
-            specId: task.specId,
-            taskId: task.taskId,
-            branch
-          }
-        })
-      });
+      await mkdir(join(worktreePath, "reports", "implementation"), { recursive: true });
+      const attempts: AttemptDiagnostic[] = [];
+      const summaryPath = join(worktreePath, "reports", "implementation", `${task.specId}.md`);
+      let parsed: ParsedCodexResponse | null = null;
+      let validationError = "";
 
-      if (!response.ok) {
-        throw new Error(`OpenAI Responses API failed: ${response.status} ${(await response.text()).trim()}`);
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        const repair = attempt > 1;
+        parsed = await requestCodexResponse(apiKey, task, branch, repair
+          ? renderRepairPrompt(task, contextText, attempts.at(-1)?.rawOutputPreview ?? "", validationError)
+          : renderUserPrompt(task, contextText)
+        );
+        const rawOutputPath = join(worktreePath, "reports", "implementation", `${task.specId}.attempt-${attempt}.txt`);
+        await writeFile(rawOutputPath, `${parsed.rawText}\n`, "utf8");
+
+        validationError = validatePatchText(parsed.patch);
+        if (!validationError) {
+          const patchPath = join(worktreePath, ".darkfactory.patch");
+          await writeFile(patchPath, `${parsed.patch}\n`, "utf8");
+          validationError = await validatePatchWithGit(worktreePath, patchPath);
+        }
+
+        attempts.push({
+          attempt,
+          responseId: parsed.responseId,
+          repair,
+          validationError: validationError || undefined,
+          rawOutputPreview: truncate(parsed.rawText, 2000)
+        });
+
+        if (!validationError) {
+          break;
+        }
       }
 
-      const payload = await response.json() as Record<string, unknown>;
-      const rawText = extractOutputText(payload);
-      const patch = extractPatch(rawText);
-      const summary = extractSummary(rawText);
-      const summaryPath = join(worktreePath, "reports", "implementation", `${task.specId}.md`);
-      await mkdir(join(worktreePath, "reports", "implementation"), { recursive: true });
-      await writeFile(summaryPath, `${summary}\n`, "utf8");
+      if (!parsed) {
+        throw new Error("Codex did not return a response.");
+      }
 
-      if (!patch.trim()) {
+      await writeFile(summaryPath, `${parsed.summary}\n`, "utf8");
+
+      if (validationError) {
         run = {
           ...run,
-          status: "blocked",
+          status: "failed",
           finishedAt: new Date().toISOString(),
-          result: "blocked",
-          summary: "Codex did not return a patch.",
-          traceId: typeof payload.id === "string" ? payload.id : undefined,
-          usage: {
-            inputTokens: Number((payload.usage as Record<string, unknown> | undefined)?.input_tokens ?? 0),
-            outputTokens: Number((payload.usage as Record<string, unknown> | undefined)?.output_tokens ?? 0),
-            estimatedCostUsd: estimateCost(
-              Number((payload.usage as Record<string, unknown> | undefined)?.input_tokens ?? 0),
-              Number((payload.usage as Record<string, unknown> | undefined)?.output_tokens ?? 0)
-            )
-          },
+          result: "failed",
+          traceId: parsed.responseId,
+          summary: validationError,
+          usage: parsed.usage,
           metadata: {
             branch,
             phase: "provider_response",
-            reason: "empty_patch",
-            responseId: payload.id
+            reason: "invalid_patch",
+            attempts
           }
         };
         this.runs.set(runId, { run, artifact: null });
@@ -139,7 +154,7 @@ export class CodexImplementationProvider implements ImplementationProvider {
       }
 
       const patchPath = join(worktreePath, ".darkfactory.patch");
-      await writeFile(patchPath, `${patch}\n`, "utf8");
+      await writeFile(patchPath, `${parsed.patch}\n`, "utf8");
       await execFileAsync("git", ["apply", "--reject", "--whitespace=nowarn", patchPath], { cwd: worktreePath, env: process.env });
 
       const changedFiles = await collectChangedFiles(worktreePath);
@@ -149,7 +164,7 @@ export class CodexImplementationProvider implements ImplementationProvider {
         repo: this.options.repo,
         worktreePath,
         task,
-        summaryText: summary,
+        summaryText: parsed.summary,
         changedFiles,
         runId
       });
@@ -159,17 +174,10 @@ export class CodexImplementationProvider implements ImplementationProvider {
         status: "completed",
         finishedAt: new Date().toISOString(),
         result: "pr_opened",
-        traceId: typeof payload.id === "string" ? payload.id : undefined,
-        summary,
-        usage: {
-          inputTokens: Number((payload.usage as Record<string, unknown> | undefined)?.input_tokens ?? 0),
-          outputTokens: Number((payload.usage as Record<string, unknown> | undefined)?.output_tokens ?? 0),
-          estimatedCostUsd: estimateCost(
-            Number((payload.usage as Record<string, unknown> | undefined)?.input_tokens ?? 0),
-            Number((payload.usage as Record<string, unknown> | undefined)?.output_tokens ?? 0)
-          )
-        },
-        metadata: { branch, responseId: payload.id }
+        traceId: parsed.responseId,
+        summary: parsed.summary,
+        usage: parsed.usage,
+        metadata: { branch, responseId: parsed.responseId, attempts }
       };
       this.runs.set(runId, { run, artifact });
       return run;
@@ -295,13 +303,96 @@ function renderUserPrompt(task: ImplementationTask, contextText: string): string
     "<short explanation>",
     "PATCH:",
     "```diff",
+    "diff --git a/path/to/file b/path/to/file",
+    "--- a/path/to/file",
+    "+++ b/path/to/file",
+    "@@",
     "<unified diff patch>",
     "```",
+    "The PATCH section must be a valid unified diff that git apply can consume directly.",
+    "Do not return prose, markdown lists, or code fences outside the required SUMMARY/PATCH structure.",
     "If the task is blocked, explain why in SUMMARY and return an empty PATCH section.",
     "",
     "Context bundle:",
     contextText
   ].join("\n");
+}
+
+function renderRepairPrompt(task: ImplementationTask, contextText: string, priorOutput: string, validationError: string): string {
+  return [
+    `Your previous response for ${task.specId} was not a valid unified diff.`,
+    `Validation error: ${validationError}`,
+    "Repair the response and return only the required two sections.",
+    "Do not describe the diff. Output only:",
+    "SUMMARY:",
+    "<short explanation>",
+    "PATCH:",
+    "```diff",
+    "diff --git a/path/to/file b/path/to/file",
+    "--- a/path/to/file",
+    "+++ b/path/to/file",
+    "@@",
+    "<valid unified diff patch>",
+    "```",
+    "",
+    "Previous invalid output:",
+    priorOutput,
+    "",
+    "Original context bundle:",
+    contextText,
+    "",
+    `Allowed paths: ${task.allowedPaths.join(", ")}.`,
+    `Blocked paths: ${task.policy.blockedPaths.join(", ")}.`
+  ].join("\n");
+}
+
+async function requestCodexResponse(apiKey: string, task: ImplementationTask, branch: string, prompt: string): Promise<ParsedCodexResponse> {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL ?? "gpt-5-codex",
+      input: [
+        {
+          role: "system",
+          content: [{ type: "input_text", text: SYSTEM_PROMPT }]
+        },
+        {
+          role: "user",
+          content: [{ type: "input_text", text: prompt }]
+        }
+      ],
+      text: { format: { type: "text" } },
+      metadata: {
+        specId: task.specId,
+        taskId: task.taskId,
+        branch
+      }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI Responses API failed: ${response.status} ${(await response.text()).trim()}`);
+  }
+
+  const payload = await response.json() as Record<string, unknown>;
+  const inputTokens = Number((payload.usage as Record<string, unknown> | undefined)?.input_tokens ?? 0);
+  const outputTokens = Number((payload.usage as Record<string, unknown> | undefined)?.output_tokens ?? 0);
+  const rawText = extractOutputText(payload);
+  return {
+    responseId: typeof payload.id === "string" ? payload.id : undefined,
+    rawText,
+    summary: extractSummary(rawText),
+    patch: extractPatch(rawText),
+    usage: {
+      inputTokens,
+      outputTokens,
+      estimatedCostUsd: estimateCost(inputTokens, outputTokens)
+    }
+  };
 }
 
 function extractOutputText(payload: Record<string, unknown>): string {
@@ -346,6 +437,44 @@ function extractPatch(text: string): string {
   return direct?.[1]?.trim() || "";
 }
 
+function validatePatchText(patch: string): string {
+  if (!patch.trim()) {
+    return "Codex did not return a patch.";
+  }
+  if (!isLikelyUnifiedDiff(patch)) {
+    return "Codex returned PATCH content that is not a valid unified diff.";
+  }
+  return "";
+}
+
+async function validatePatchWithGit(worktreePath: string, patchPath: string): Promise<string> {
+  try {
+    await execFileAsync("git", ["apply", "--check", patchPath], { cwd: worktreePath, env: process.env });
+    return "";
+  } catch (error) {
+    const stderr = error instanceof Error && "stderr" in error ? String((error as { stderr?: string }).stderr ?? "") : "";
+    return stderr.trim() || (error instanceof Error ? error.message : String(error));
+  }
+}
+
+function isLikelyUnifiedDiff(patch: string): boolean {
+  const normalized = patch.trim();
+  if (!normalized) {
+    return false;
+  }
+  const hasDiffHeader = normalized.includes("diff --git ");
+  const hasFileHeaders = normalized.includes("\n--- ") && normalized.includes("\n+++ ");
+  const hasHunk = normalized.includes("\n@@");
+  return hasDiffHeader && hasFileHeaders && hasHunk;
+}
+
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength)}...`;
+}
+
 function estimateCost(inputTokens: number, outputTokens: number): number {
   return Number((((inputTokens / 1_000_000) * 1.25) + ((outputTokens / 1_000_000) * 10)).toFixed(6));
 }
@@ -362,3 +491,12 @@ const SYSTEM_PROMPT = [
   "Prefer code and tests over prose.",
   "If the spec is ambiguous or unsafe, stop and explain the blocker."
 ].join(" ");
+
+export const codexProviderInternals = {
+  extractOutputText,
+  extractSummary,
+  extractPatch,
+  validatePatchText,
+  isLikelyUnifiedDiff,
+  renderRepairPrompt
+};
