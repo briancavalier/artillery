@@ -1,13 +1,13 @@
 {
   "version": "v1",
-  "generatedAt": "2026-03-09T01:24:33.337Z",
+  "generatedAt": "2026-03-09T01:32:54.795Z",
   "repository": "briancavalier/artillery",
   "branch": "main",
-  "commitSha": "73465b8d07d4e259f0b382a0e4c03a3087e7a717",
+  "commitSha": "75568d1797c88cf0102098ea32a0379f9ef07768",
   "queued": [
     {
       "specId": "SPEC-0003",
-      "taskId": "8a8ffc2d-8f21-41fe-93c0-cc6c0d129fbc",
+      "taskId": "6ff06605-5086-42df-b7b9-e199831ff64b",
       "branchName": "codex/implement-spec-0003",
       "status": "queued",
       "created": true
@@ -18,17 +18,17 @@
       "specId": "SPEC-0003",
       "previousStatus": "Approved",
       "finalStatus": "Approved",
-      "taskStatus": "failed",
-      "runId": "b1df8e5b-de95-4f3f-b231-314ab4c9a181",
-      "runStatus": "failed",
-      "runResult": "failed",
+      "taskStatus": "blocked",
+      "runId": "f04f996b-9773-49ae-87c6-33bd092a3c67",
+      "runStatus": "blocked",
+      "runResult": "blocked",
       "provider": "openai-codex",
       "model": "gpt-5-codex",
-      "traceId": "resp_077d2b2c6a07ba610069ae21468e3481a091aeedb2a172ad55",
+      "traceId": "resp_0e2c6faa2624fb580069ae232cb13881a0ac3771915586ccc3",
       "evidenceGenerated": 4,
       "passedEvidence": 0,
-      "failureReason": "error: corrupt patch at line 10 (artifact missing)",
-      "runSummary": "error: corrupt patch at line 10"
+      "blockedReason": "Blocked: Missing access to the existing terrain-generation architecture and integration points needed to implement SPEC-0003 without risking incorrect assumptions.",
+      "runSummary": "Blocked: Missing access to the existing terrain-generation architecture and integration points needed to implement SPEC-0003 without risking incorrect assumptions."
     }
   ]
 }

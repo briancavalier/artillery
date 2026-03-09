@@ -110,6 +110,59 @@
       "provider": "openai-codex",
       "model": "gpt-5-codex",
       "failedReason": "error: corrupt patch at line 10 (artifact missing)"
+    },
+    {
+      "taskId": "6ff06605-5086-42df-b7b9-e199831ff64b",
+      "specId": "SPEC-0003",
+      "source": "human",
+      "owner": "@briancavalier",
+      "repo": "briancavalier/artillery",
+      "baseBranch": "main",
+      "baseSha": "75568d1797c88cf0102098ea32a0379f9ef07768",
+      "targetBranch": "codex/implement-spec-0003",
+      "allowedPaths": [
+        "apps/artillery-game/**",
+        "tests/**",
+        "evidence/SPEC-0003/**",
+        "docs/**"
+      ],
+      "verificationTargets": [
+        "SCN-0301",
+        "SCN-0302",
+        "SCN-0303",
+        "SCN-0304"
+      ],
+      "contextBundleRef": "/home/runner/work/artillery/artillery/reports/implementation-context/SPEC-0003.md",
+      "attempt": 0,
+      "priority": 100,
+      "limits": {
+        "maxTurns": 6,
+        "maxDurationMs": 900000,
+        "maxCostUsd": 5,
+        "maxFilesChanged": 24
+      },
+      "policy": {
+        "allowAutoMerge": true,
+        "allowShell": true,
+        "allowNetwork": false,
+        "blockedPaths": [
+          "apps/factory-api/**",
+          "packages/factory-core/**",
+          "packages/factory-runner/**",
+          "packages/implementation-provider-codex/**",
+          ".github/workflows/**",
+          "policy/**",
+          ".env*",
+          "render.yaml"
+        ]
+      },
+      "status": "blocked",
+      "createdAt": "2026-03-09T01:32:05.731Z",
+      "updatedAt": "2026-03-09T01:32:54.790Z",
+      "runId": "f04f996b-9773-49ae-87c6-33bd092a3c67",
+      "provider": "openai-codex",
+      "model": "gpt-5-codex",
+      "blockedReason": "Blocked: Missing access to the existing terrain-generation architecture and integration points needed to implement SPEC-0003 without risking incorrect assumptions."
     }
   ],
   "implementationRuns": [
@@ -201,6 +254,44 @@
             "repairKind": "format",
             "validationError": "error: corrupt patch at line 10",
             "rawOutputPreview": "SUMMARY:\nDocumented SPEC-0003 blocker since spec details remain unavailable.\n\nPATCH:\n```diff\ndiff --git a/docs/SPEC-0003-blocker.md b/docs/SPEC-0003-blocker.md\n--- a/docs/SPEC-0003-blocker.md\n+++ b/docs/SPEC-0003-blocker.md\n@@ -0,0 +1,7 @@\n+# SPEC-0003 Blocker\n+\n+- Reason: SPEC-0003 contents were unavailable in the provided implementation context.\n+- Impact: Unable to implement or validate the required changes safely.\n+- Mitigation: Please supply the complete SPEC-0003 details or clarify the expected changes so implementation can proceed.\n```"
+          }
+        ]
+      }
+    },
+    {
+      "runId": "f04f996b-9773-49ae-87c6-33bd092a3c67",
+      "taskId": "6ff06605-5086-42df-b7b9-e199831ff64b",
+      "provider": "openai-codex",
+      "model": "gpt-5-codex",
+      "status": "blocked",
+      "startedAt": "2026-03-09T01:32:05.734Z",
+      "usage": {
+        "inputTokens": 860,
+        "outputTokens": 3801,
+        "estimatedCostUsd": 0.039085
+      },
+      "finishedAt": "2026-03-09T01:32:54.771Z",
+      "result": "blocked",
+      "traceId": "resp_0e2c6faa2624fb580069ae232cb13881a0ac3771915586ccc3",
+      "summary": "Blocked: Missing access to the existing terrain-generation architecture and integration points needed to implement SPEC-0003 without risking incorrect assumptions.",
+      "metadata": {
+        "branch": "codex/implement-spec-0003",
+        "phase": "provider_response",
+        "reason": "blocked_by_model",
+        "attempts": [
+          {
+            "attempt": 1,
+            "responseId": "resp_071e2b1a2739b1b50069ae23165e808193981a00df12a52b7d",
+            "repair": false,
+            "validationError": "Codex returned PATCH content that is not a valid unified diff.",
+            "rawOutputPreview": "SUMMARY:\nBlocked: Unable to implement SPEC-0003 without existing terrain-generation context; need current heightmap structure and integration points to design deterministic high-resolution terrain.\nPATCH:\n```diff\n```"
+          },
+          {
+            "attempt": 2,
+            "responseId": "resp_0e2c6faa2624fb580069ae232cb13881a0ac3771915586ccc3",
+            "repair": true,
+            "repairKind": "format",
+            "rawOutputPreview": "SUMMARY:\nBlocked: Missing access to the existing terrain-generation architecture and integration points needed to implement SPEC-0003 without risking incorrect assumptions.\nPATCH:"
           }
         ]
       }
