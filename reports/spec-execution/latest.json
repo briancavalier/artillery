@@ -1,9 +1,85 @@
 {
   "version": "v1",
-  "generatedAt": "2026-03-09T23:29:08.514Z",
+  "generatedAt": "2026-03-09T23:40:49.612Z",
   "repository": "briancavalier/artillery",
   "branch": "main",
-  "commitSha": "68d73e5e9574e014e8fdabf09d71b89e6e7315a7",
-  "queued": [],
-  "advanced": []
+  "commitSha": "a36300372d24201a255179c2d845626d344d84a1",
+  "queued": [
+    {
+      "specId": "SPEC-0003",
+      "taskId": "ad98267c-06ee-4666-9ae0-f198ccf6d911",
+      "branchName": "codex/implement-spec-0003",
+      "status": "queued",
+      "created": true
+    }
+  ],
+  "advanced": [
+    {
+      "specId": "SPEC-0003",
+      "previousStatus": "Architected",
+      "finalStatus": "Architected",
+      "taskStatus": "failed",
+      "runId": "03dbdbde-39ff-40b3-95ef-fcdf71f4d593",
+      "runStatus": "failed",
+      "runResult": "failed",
+      "provider": "openai-codex",
+      "model": "gpt-5-codex",
+      "evidenceGenerated": 4,
+      "passedEvidence": 0,
+      "failureReason": "OpenAI Responses API timed out after 45000ms (artifact missing)",
+      "runSummary": "OpenAI Responses API timed out after 45000ms",
+      "discoveryFilesRead": [
+        "architecture/SPEC-0003/README.md",
+        "architecture/SPEC-0003/integration-points.json",
+        "architecture/SPEC-0003/invariants.json",
+        "architecture/SPEC-0003/scenario-trace.json",
+        "apps/artillery-game/src/shared/simulation.ts",
+        "apps/artillery-game/src/shared/types.ts",
+        "apps/artillery-game/src/client/main.ts",
+        "apps/artillery-game/src/server/match-store.ts",
+        "tests/determinism.test.ts",
+        "packages/project-adapter-artillery/src/evidence.ts",
+        "evidence/SPEC-0003/README.md",
+        "tests/protocol.test.ts",
+        "apps/artillery-game/src/server/http.ts",
+        "specs/SPEC-0003.json",
+        "apps/artillery-game/src/shared/determinism.ts",
+        "evidence/SPEC-0003/SCN-0301.json",
+        "evidence/SPEC-0003/SCN-0302.json",
+        "evidence/SPEC-0003/SCN-0303.json",
+        "evidence/SPEC-0003/SCN-0304.json",
+        "tests/canary-thresholds.test.ts",
+        "tests/event-mode.test.ts",
+        "tests/factory-api.test.ts"
+      ],
+      "discoveryFilesSelected": [
+        "architecture/SPEC-0003/README.md",
+        "architecture/SPEC-0003/integration-points.json",
+        "architecture/SPEC-0003/invariants.json",
+        "architecture/SPEC-0003/scenario-trace.json",
+        "apps/artillery-game/src/shared/simulation.ts",
+        "apps/artillery-game/src/shared/types.ts",
+        "apps/artillery-game/src/client/main.ts",
+        "apps/artillery-game/src/server/match-store.ts",
+        "tests/determinism.test.ts",
+        "packages/project-adapter-artillery/src/evidence.ts",
+        "evidence/SPEC-0003/README.md",
+        "tests/protocol.test.ts",
+        "apps/artillery-game/src/server/http.ts",
+        "specs/SPEC-0003.json",
+        "apps/artillery-game/src/shared/determinism.ts",
+        "evidence/SPEC-0003/SCN-0301.json",
+        "evidence/SPEC-0003/SCN-0302.json",
+        "evidence/SPEC-0003/SCN-0303.json",
+        "evidence/SPEC-0003/SCN-0304.json",
+        "tests/canary-thresholds.test.ts",
+        "tests/event-mode.test.ts",
+        "tests/factory-api.test.ts"
+      ],
+      "discoveryBudgetUsed": {
+        "files": 22,
+        "bytes": 75730
+      }
+    }
+  ]
 }
