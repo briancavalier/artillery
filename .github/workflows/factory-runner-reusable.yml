@@ -18,6 +18,10 @@ on:
         required: false
         type: string
         default: ""
+      factory_api_base_url:
+        required: false
+        type: string
+        default: ""
       run_learning:
         required: false
         type: boolean
@@ -60,6 +64,7 @@ jobs:
       - name: Verify specs
         env:
           DEPLOY_ID: ${{ inputs.deploy_id }}
+          FACTORY_API_BASE_URL: ${{ inputs.factory_api_base_url }}
         run: npm run factory:verify
       - name: Deploy via factory runner
         if: ${{ inputs.deploy_mode != 'none' }}
@@ -67,12 +72,14 @@ jobs:
           DEPLOY_ID: ${{ inputs.deploy_id }}
           FACTORY_COMMIT_SHA: ${{ github.sha }}
           FACTORY_DEPLOY_MODE: ${{ inputs.deploy_mode }}
+          FACTORY_API_BASE_URL: ${{ inputs.factory_api_base_url }}
           RENDER_STAGING_DEPLOY_HOOK: ${{ secrets.render_staging_deploy_hook }}
           RENDER_PROD_DEPLOY_HOOK: ${{ secrets.render_production_deploy_hook }}
         run: npm run factory:deploy
       - name: Run canary
         if: ${{ inputs.run_canary }}
         env:
+          FACTORY_API_BASE_URL: ${{ inputs.factory_api_base_url }}
           PROJECT_CONTROL_BASE_URL: ${{ inputs.project_control_base_url }}
         run: npm run canary
       - name: Assert canary pass
@@ -83,12 +90,17 @@ jobs:
         env:
           DEPLOY_ID: ${{ inputs.deploy_id }}
           REASON: Canary SLO breach in ${{ inputs.environment_name }} for deploy ${{ inputs.deploy_id }}
+          FACTORY_API_BASE_URL: ${{ inputs.factory_api_base_url }}
           PROJECT_CONTROL_BASE_URL: ${{ inputs.project_control_base_url }}
         run: npm run factory:auto-rollback
       - name: Generate reports
+        env:
+          FACTORY_API_BASE_URL: ${{ inputs.factory_api_base_url }}
         run: npm run reports:generate
       - name: Generate feature proposals
         if: ${{ inputs.run_learning }}
+        env:
+          FACTORY_API_BASE_URL: ${{ inputs.factory_api_base_url }}
         run: npm run feature:proposals
       - name: Upload reports
         uses: actions/upload-artifact@v4

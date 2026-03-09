@@ -11,6 +11,7 @@ jobs:
     with:
       environment_name: production
       deploy_mode: none
+      factory_api_base_url: ${{ vars.PROD_FACTORY_API_BASE_URL || vars.PRODUCTION_FACTORY_API_BASE_URL }}
       run_canary: false
       run_learning: true
       deploy_id: run-${{ github.run_id }}-weekly
