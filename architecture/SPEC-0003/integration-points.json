@@ -1,0 +1,74 @@
+[
+  {
+    "path": "apps/artillery-game/src/shared/simulation.ts",
+    "role": "Integrate TerrainSurface into match lifecycle (generation, spawn placement, crater updates).",
+    "writeIntent": "modify",
+    "priority": 1
+  },
+  {
+    "path": "apps/artillery-game/src/shared/types.ts",
+    "role": "Define TerrainSurface contract and extend MatchState/public state types.",
+    "writeIntent": "modify",
+    "priority": 2
+  },
+  {
+    "path": "apps/artillery-game/src/shared/terrain/generator.ts",
+    "role": "Pure terrain generation module producing high-resolution heights, metrics, and spawn slots.",
+    "writeIntent": "create",
+    "priority": 3
+  },
+  {
+    "path": "apps/artillery-game/src/shared/terrain/crater.ts",
+    "role": "Encapsulate crater deformation logic with smooth falloff and metadata output.",
+    "writeIntent": "create",
+    "priority": 4
+  },
+  {
+    "path": "apps/artillery-game/src/shared/terrain/index.ts",
+    "role": "Export terrain utilities (generator, crater, helpers) for simulation and tests.",
+    "writeIntent": "create",
+    "priority": 5
+  },
+  {
+    "path": "apps/artillery-game/src/client/main.ts",
+    "role": "Render high-resolution terrain and respond to terrain.version updates for smooth UX.",
+    "writeIntent": "modify",
+    "priority": 6
+  },
+  {
+    "path": "apps/artillery-game/src/server/match-store.ts",
+    "role": "Capture performance metrics for terrain generation/updates and surface them via ledger events.",
+    "writeIntent": "modify",
+    "priority": 7
+  },
+  {
+    "path": "tests/terrain-playability.test.ts",
+    "role": "Validate terrain variation metrics and spawn slot stability for SCN-0301.",
+    "writeIntent": "create",
+    "priority": 8
+  },
+  {
+    "path": "tests/terrain-deformation.test.ts",
+    "role": "Assert crater smoothness/locality and deformation metadata for SCN-0303.",
+    "writeIntent": "create",
+    "priority": 9
+  },
+  {
+    "path": "tests/performance-terrain.test.ts",
+    "role": "Exercise terrain generation and crater application against latency budgets for SCN-0304.",
+    "writeIntent": "create",
+    "priority": 10
+  },
+  {
+    "path": "tests/determinism.test.ts",
+    "role": "Extend replay hash coverage to include TerrainSurface.version and deformation history for SCN-0302.",
+    "writeIntent": "modify",
+    "priority": 11
+  },
+  {
+    "path": "packages/project-adapter-artillery/src/evidence.ts",
+    "role": "Wire scenario verifiers to new terrain metadata and performance metrics for automated evidence capture.",
+    "writeIntent": "modify",
+    "priority": 12
+  }
+]
