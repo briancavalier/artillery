@@ -104,6 +104,12 @@ export async function processImplementationQueue(
       branch: task.targetBranch,
       attempt: task.attempt
     });
+    await emit(adapter, options, "implementation_context_discovery_started", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+      taskId: task.taskId,
+      branch: task.targetBranch,
+      attempt: task.attempt,
+      contextBundleRef: task.contextBundleRef
+    });
 
     try {
       const run = await provider.startTask(task);
@@ -116,6 +122,23 @@ export async function processImplementationQueue(
       if (artifact) {
         artifact.runId = run.runId;
         await store.writeImplementationArtifact(artifact);
+      }
+
+      if (run.discovery) {
+        await emit(adapter, options, "implementation_context_discovery_completed", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+          taskId: task.taskId,
+          runId: run.runId,
+          provider: run.provider,
+          model: run.model,
+          traceId: run.traceId ?? "",
+          searchedFiles: run.discovery.searchedFiles.slice(0, 200),
+          readFiles: run.discovery.readFiles,
+          selectedContextFiles: run.discovery.selectedContextFiles,
+          selectionReasons: run.discovery.selectionReasons,
+          blockedCategory: run.discovery.blockedCategory ?? "",
+          blockedReason: run.discovery.blockedReason ?? "",
+          discoveryBudgetUsed: run.discovery.budgetUsed
+        });
       }
 
       if (run.status === "blocked" || run.result === "blocked") {
@@ -133,8 +156,23 @@ export async function processImplementationQueue(
           estimatedCostUsd: run.usage.estimatedCostUsd,
           inputTokens: run.usage.inputTokens,
           outputTokens: run.usage.outputTokens,
+          selectedContextFiles: run.discovery?.selectedContextFiles ?? [],
+          discoveryBudgetUsed: run.discovery?.budgetUsed,
           blockedReason: task.blockedReason ?? ""
         });
+        if (run.discovery?.blockedReason) {
+          await emit(adapter, options, "implementation_context_discovery_blocked", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+            taskId: task.taskId,
+            runId: run.runId,
+            provider: run.provider,
+            model: run.model,
+            traceId: run.traceId ?? "",
+            blockedCategory: run.discovery.blockedCategory ?? "",
+            blockedReason: run.discovery.blockedReason,
+            selectedContextFiles: run.discovery.selectedContextFiles,
+            discoveryBudgetUsed: run.discovery.budgetUsed
+          });
+        }
         processed.push(task);
         continue;
       }
@@ -412,6 +450,32 @@ async function writeContextBundle(
   const specId = spec.specId;
   const path = join(rootDir, "reports", "implementation-context", `${specId}.md`);
   await mkdir(dirname(path), { recursive: true });
+  const discoveryMetadata = {
+    version: "v1",
+    spec: {
+      specId: spec.specId,
+      title: spec.title,
+      intent: spec.intent,
+      riskNotes: spec.riskNotes,
+      scenarios: spec.scenarios,
+      verification: spec.verification
+    },
+    context: context
+      ? {
+          relevantFiles: context.relevantFiles,
+          readPaths: context.readPaths,
+          seedFiles: context.seedFiles,
+          discoveryGoals: context.discoveryGoals,
+          discoveryBudget: context.discoveryBudget,
+          allowedPaths: context.allowedPaths,
+          blockedPaths: context.blockedPaths,
+          recommendedCommands: context.recommendedCommands,
+          evidenceCapabilities: context.evidenceCapabilities,
+          reviewNotes: context.reviewNotes,
+          maxFilesChanged: context.maxFilesChanged
+        }
+      : null
+  };
   const specSection = [
     `# Accepted Spec ${specId}`,
     "",
@@ -430,16 +494,30 @@ async function writeContextBundle(
         "",
         "## Project Context",
         `Relevant files: ${context.relevantFiles.join(", ")}`,
+        `Read paths: ${context.readPaths.join(", ")}`,
+        `Seed files: ${context.seedFiles.join(", ")}`,
+        `Discovery goals: ${context.discoveryGoals.join(" | ")}`,
+        `Discovery budget: files=${context.discoveryBudget.maxFiles}, bytes=${context.discoveryBudget.maxBytes}`,
         `Allowed paths: ${context.allowedPaths.join(", ")}`,
         `Blocked paths: ${context.blockedPaths.join(", ")}`,
         `Recommended commands: ${context.recommendedCommands.join(", ")}`,
         `Evidence capabilities: ${context.evidenceCapabilities.join(", ")}`,
-        `Review notes: ${context.reviewNotes.join(" | ")}`
+        `Review notes: ${context.reviewNotes.join(" | ")}`,
+        "",
+        "## Discovery Metadata",
+        "```json",
+        JSON.stringify(discoveryMetadata, null, 2),
+        "```"
       ]
     : [
         "",
         "## Project Context",
-        "No adapter context available."
+        "No adapter context available.",
+        "",
+        "## Discovery Metadata",
+        "```json",
+        JSON.stringify(discoveryMetadata, null, 2),
+        "```"
       ];
   const body = [...specSection, ...contextSection].join("\n");
   await writeFile(path, `${body}\n`, "utf8");

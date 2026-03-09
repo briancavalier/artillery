@@ -26,6 +26,13 @@ export interface ExecutionAdvanceItem {
   blockedReason?: string;
   failureReason?: string;
   runSummary?: string;
+  discoveryFilesRead?: string[];
+  discoveryFilesSelected?: string[];
+  discoveryBlockedReason?: string;
+  discoveryBudgetUsed?: {
+    files: number;
+    bytes: number;
+  };
   pullRequestNumber?: number;
   pullRequestUrl?: string;
 }

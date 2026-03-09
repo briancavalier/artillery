@@ -159,6 +159,26 @@ export interface ImplementationTaskPolicy {
   blockedPaths: string[];
 }
 
+export interface ImplementationDiscoveryBudget {
+  maxFiles: number;
+  maxBytes: number;
+}
+
+export interface ImplementationDiscoveryUsage {
+  files: number;
+  bytes: number;
+}
+
+export interface ImplementationDiscoveryTrace {
+  searchedFiles: string[];
+  readFiles: string[];
+  selectedContextFiles: string[];
+  selectionReasons: Record<string, string>;
+  blockedCategory?: string;
+  blockedReason?: string;
+  budgetUsed: ImplementationDiscoveryUsage;
+}
+
 export interface ImplementationTask {
   taskId: string;
   specId: string;
@@ -206,6 +226,7 @@ export interface ImplementationRun {
   usage: ImplementationUsage;
   result?: ImplementationResult;
   summary?: string;
+  discovery?: ImplementationDiscoveryTrace;
   metadata?: Record<string, unknown>;
 }
 
@@ -224,6 +245,7 @@ export interface ImplementationArtifact {
   };
   evidenceRefs: string[];
   summaryMd: string;
+  discovery?: ImplementationDiscoveryTrace;
   metadata?: Record<string, unknown>;
 }
 

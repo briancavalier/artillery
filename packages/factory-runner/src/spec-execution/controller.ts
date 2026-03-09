@@ -78,6 +78,10 @@ export async function runSpecExecution(options: RunSpecExecutionOptions): Promis
       blockedReason: task.blockedReason,
       failureReason: task.failedReason,
       runSummary: run?.summary,
+      discoveryFilesRead: run?.discovery?.readFiles,
+      discoveryFilesSelected: run?.discovery?.selectedContextFiles ?? artifact?.discovery?.selectedContextFiles,
+      discoveryBlockedReason: run?.discovery?.blockedReason,
+      discoveryBudgetUsed: run?.discovery?.budgetUsed,
       pullRequestNumber: task.prNumber ?? artifact?.prNumber,
       pullRequestUrl: task.prUrl ?? artifact?.prUrl
     };

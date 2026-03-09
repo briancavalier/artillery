@@ -23,7 +23,29 @@ class DummyProvider implements ImplementationProvider {
       finishedAt: new Date().toISOString(),
       result: "pr_opened",
       usage: { inputTokens: 10, outputTokens: 20, estimatedCostUsd: 0.001 },
-      summary: "dummy run"
+      summary: "dummy run",
+      discovery: {
+        searchedFiles: [
+          "apps/artillery-game/src/shared/simulation.ts",
+          "tests/determinism.test.ts"
+        ],
+        readFiles: [
+          "apps/artillery-game/src/shared/simulation.ts",
+          "tests/determinism.test.ts"
+        ],
+        selectedContextFiles: [
+          "apps/artillery-game/src/shared/simulation.ts",
+          "tests/determinism.test.ts"
+        ],
+        selectionReasons: {
+          "apps/artillery-game/src/shared/simulation.ts": "seed file",
+          "tests/determinism.test.ts": "path matches keywords: determin"
+        },
+        budgetUsed: {
+          files: 2,
+          bytes: 128
+        }
+      }
     };
   }
 
@@ -44,7 +66,29 @@ class DummyProvider implements ImplementationProvider {
       filesChanged: this.filesChanged,
       testSummary: { passed: 0, failed: 0, command: "dummy" },
       evidenceRefs: [],
-      summaryMd: "dummy artifact"
+      summaryMd: "dummy artifact",
+      discovery: {
+        searchedFiles: [
+          "apps/artillery-game/src/shared/simulation.ts",
+          "tests/determinism.test.ts"
+        ],
+        readFiles: [
+          "apps/artillery-game/src/shared/simulation.ts",
+          "tests/determinism.test.ts"
+        ],
+        selectedContextFiles: [
+          "apps/artillery-game/src/shared/simulation.ts",
+          "tests/determinism.test.ts"
+        ],
+        selectionReasons: {
+          "apps/artillery-game/src/shared/simulation.ts": "seed file",
+          "tests/determinism.test.ts": "path matches keywords: determin"
+        },
+        budgetUsed: {
+          files: 2,
+          bytes: 128
+        }
+      }
     };
   }
 }
@@ -130,6 +174,16 @@ test("execution controller enqueues and verifies supported approved specs", asyn
     assert.match(contextBundle, /# Accepted Spec SPEC-EXEC-1/);
     assert.match(contextBundle, /Intent: Advance accepted specs/);
     assert.match(contextBundle, /## Required Scenarios/);
+    assert.match(contextBundle, /## Discovery Metadata/);
+    assert.match(contextBundle, /"readPaths": \[/);
+    assert.deepEqual(result.manifest.advanced[0]?.discoveryFilesSelected, [
+      "apps/artillery-game/src/shared/simulation.ts",
+      "tests/determinism.test.ts"
+    ]);
+    assert.deepEqual(result.manifest.advanced[0]?.discoveryBudgetUsed, {
+      files: 2,
+      bytes: 128
+    });
     const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
     assert.equal(stored.status, "Verified");
   } finally {
@@ -212,6 +266,10 @@ test("execution controller does not merge when required evidence fails", async (
     assert.equal(result.manifest.advanced[0]?.taskStatus, "blocked");
     assert.match(result.manifest.advanced[0]?.blockedReason ?? "", /Required scenario evidence missing or failed/);
     assert.equal(result.manifest.advanced[0]?.pullRequestNumber, 7);
+    assert.deepEqual(result.manifest.advanced[0]?.discoveryFilesSelected, [
+      "apps/artillery-game/src/shared/simulation.ts",
+      "tests/determinism.test.ts"
+    ]);
     const stored = await readJson<{ status: string }>(join(workspace, "specs/SPEC-EXEC-1.json"));
     assert.equal(stored.status, "Approved");
   } finally {

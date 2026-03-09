@@ -34,9 +34,18 @@ export interface ImplementationScope {
   maxFilesChanged?: number;
 }
 
+export interface ImplementationDiscoveryBudget {
+  maxFiles: number;
+  maxBytes: number;
+}
+
 export interface ImplementationContext {
   specId: string;
   relevantFiles: string[];
+  readPaths: string[];
+  seedFiles: string[];
+  discoveryGoals: string[];
+  discoveryBudget: ImplementationDiscoveryBudget;
   allowedPaths: string[];
   blockedPaths: string[];
   recommendedCommands: string[];

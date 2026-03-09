@@ -1,11 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { ImplementationArtifact, ImplementationRun, ImplementationTask } from "@darkfactory/contracts";
-import type { ImplementationProvider } from "@darkfactory/core";
+import type {
+  FeatureSpec,
+  ImplementationArtifact,
+  ImplementationDiscoveryBudget,
+  ImplementationDiscoveryTrace,
+  ImplementationRun,
+  ImplementationTask,
+  ScenarioSpec
+} from "@darkfactory/contracts";
+import type { ImplementationContext, ImplementationProvider } from "@darkfactory/core";
 import { GitHubAutomationApi } from "./github.js";
 
 const execFileAsync = promisify(execFile);
@@ -35,6 +43,26 @@ interface ParsedCodexResponse {
   };
 }
 
+interface ParsedContextBundle {
+  spec: Pick<FeatureSpec, "specId" | "title" | "intent" | "riskNotes" | "verification"> & {
+    scenarios: ScenarioSpec[];
+  };
+  context: Pick<
+    ImplementationContext,
+    | "relevantFiles"
+    | "readPaths"
+    | "seedFiles"
+    | "discoveryGoals"
+    | "discoveryBudget"
+    | "allowedPaths"
+    | "blockedPaths"
+    | "recommendedCommands"
+    | "evidenceCapabilities"
+    | "reviewNotes"
+    | "maxFilesChanged"
+  > | null;
+}
+
 interface AttemptDiagnostic {
   attempt: number;
   responseId?: string;
@@ -52,6 +80,17 @@ interface PatchCheckResult {
 interface BlockedResponse {
   blocked: boolean;
   reason?: string;
+}
+
+interface FileCandidate {
+  path: string;
+  score: number;
+  reasons: string[];
+}
+
+interface DiscoveryOutcome {
+  trace: ImplementationDiscoveryTrace;
+  promptContext: string;
 }
 
 export class CodexImplementationProvider implements ImplementationProvider {
@@ -103,6 +142,38 @@ export class CodexImplementationProvider implements ImplementationProvider {
       await execGit(worktreePath, ["checkout", branch]);
 
       const contextText = await readContext(task.contextBundleRef);
+      const discovery = await discoverImplementationContext(worktreePath, task, contextText);
+      const discoveryMetadata = {
+        discovery: discovery.trace
+      };
+      run = {
+        ...run,
+        discovery: discovery.trace,
+        metadata: {
+          ...(run.metadata ?? {}),
+          ...discoveryMetadata
+        }
+      };
+      this.runs.set(runId, { run, artifact: null });
+
+      if (discovery.trace.blockedReason && discovery.trace.selectedContextFiles.length === 0) {
+        run = {
+          ...run,
+          status: "blocked",
+          finishedAt: new Date().toISOString(),
+          result: "blocked",
+          summary: discovery.trace.blockedReason,
+          metadata: {
+            ...(run.metadata ?? {}),
+            branch,
+            phase: "context_discovery",
+            reason: discovery.trace.blockedCategory ?? "discovery_blocked"
+          }
+        };
+        this.runs.set(runId, { run, artifact: null });
+        return run;
+      }
+
       await mkdir(join(worktreePath, "reports", "implementation"), { recursive: true });
       const attempts: AttemptDiagnostic[] = [];
       const summaryPath = join(worktreePath, "reports", "implementation", `${task.specId}.md`);
@@ -113,16 +184,17 @@ export class CodexImplementationProvider implements ImplementationProvider {
         const lastAttempt = attempts.at(-1);
         const repairKind = attempt === 1 ? undefined : (patchCheck.kind === "apply" ? "apply" : "format");
         const prompt = attempt === 1
-          ? renderUserPrompt(task, contextText)
+          ? renderUserPrompt(task, contextText, discovery.promptContext)
           : repairKind === "apply"
             ? renderApplyRepairPrompt(
                 task,
                 contextText,
+                discovery.promptContext,
                 lastAttempt?.rawOutputPreview ?? "",
                 patchCheck.message,
                 await buildFileSnapshots(worktreePath, extractPatchedPaths(parsed?.patch ?? ""))
               )
-            : renderRepairPrompt(task, contextText, lastAttempt?.rawOutputPreview ?? "", patchCheck.message);
+            : renderRepairPrompt(task, contextText, discovery.promptContext, lastAttempt?.rawOutputPreview ?? "", patchCheck.message);
 
         parsed = await requestCodexResponse(apiKey, task, branch, prompt);
         const rawOutputPath = join(worktreePath, "reports", "implementation", `${task.specId}.attempt-${attempt}.txt`);
@@ -138,7 +210,9 @@ export class CodexImplementationProvider implements ImplementationProvider {
             traceId: parsed.responseId,
             summary: blocked.reason ?? parsed.summary,
             usage: parsed.usage,
+            discovery: discovery.trace,
             metadata: {
+              ...(run.metadata ?? {}),
               branch,
               phase: "provider_response",
               reason: "blocked_by_model",
@@ -195,7 +269,9 @@ export class CodexImplementationProvider implements ImplementationProvider {
           traceId: parsed.responseId,
           summary: patchCheck.message,
           usage: parsed.usage,
+          discovery: discovery.trace,
           metadata: {
+            ...(run.metadata ?? {}),
             branch,
             phase: "provider_response",
             reason: patchCheck.kind === "apply" ? "patch_does_not_apply" : "invalid_patch",
@@ -231,9 +307,25 @@ export class CodexImplementationProvider implements ImplementationProvider {
         traceId: parsed.responseId,
         summary: parsed.summary,
         usage: parsed.usage,
-        metadata: { branch, responseId: parsed.responseId, attempts }
+        discovery: discovery.trace,
+        metadata: {
+          ...(run.metadata ?? {}),
+          branch,
+          responseId: parsed.responseId,
+          attempts
+        }
       };
-      this.runs.set(runId, { run, artifact });
+      this.runs.set(runId, {
+        run,
+        artifact: {
+          ...artifact,
+          discovery: discovery.trace,
+          metadata: {
+            ...(artifact.metadata ?? {}),
+            discovery: discovery.trace
+          }
+        }
+      });
       return run;
     } catch (error) {
       run = {
@@ -243,6 +335,7 @@ export class CodexImplementationProvider implements ImplementationProvider {
         result: "failed",
         summary: error instanceof Error ? error.message : String(error),
         metadata: {
+          ...(run.metadata ?? {}),
           branch,
           phase: "provider_execution",
           errorName: error instanceof Error ? error.name : "Error",
@@ -356,7 +449,61 @@ async function cleanupScratchFiles(worktreePath: string): Promise<void> {
   }
 }
 
-function renderUserPrompt(task: ImplementationTask, contextText: string): string {
+async function discoverImplementationContext(
+  worktreePath: string,
+  task: ImplementationTask,
+  contextText: string
+): Promise<DiscoveryOutcome> {
+  const parsedContext = parseContextBundleMetadata(contextText);
+  const readPaths = parsedContext?.context?.readPaths?.length ? parsedContext.context.readPaths : ["**"];
+  const seedFiles = uniquePaths([
+    ...(parsedContext?.context?.seedFiles ?? []),
+    ...(parsedContext?.context?.relevantFiles ?? [])
+  ]);
+  const discoveryGoals = parsedContext?.context?.discoveryGoals ?? [];
+  const discoveryBudget = parsedContext?.context?.discoveryBudget ?? { maxFiles: 40, maxBytes: 200_000 };
+  const repoFiles = await listRepoFiles(worktreePath, readPaths);
+  const searchedFiles = [...repoFiles];
+  const keywords = extractDiscoveryKeywords(parsedContext);
+  const contentMatches = await searchFilesByKeyword(worktreePath, keywords);
+  const candidates = scoreDiscoveryCandidates(repoFiles, seedFiles, contentMatches, keywords);
+  const selection = await selectContextFiles(worktreePath, candidates, discoveryBudget);
+
+  if (selection.selectedFiles.length === 0) {
+    const blockedReason = `Blocked: Discovery could not identify plausible integration points for ${task.specId} within the configured read budget.`;
+    return {
+      trace: {
+        searchedFiles,
+        readFiles: [],
+        selectedContextFiles: [],
+        selectionReasons: {},
+        blockedCategory: "discovery_no_candidates",
+        blockedReason,
+        budgetUsed: {
+          files: 0,
+          bytes: 0
+        }
+      },
+      promptContext: [
+        "## Discovery Context",
+        blockedReason
+      ].join("\n")
+    };
+  }
+
+  return {
+    trace: {
+      searchedFiles,
+      readFiles: selection.readFiles,
+      selectedContextFiles: selection.selectedFiles,
+      selectionReasons: selection.selectionReasons,
+      budgetUsed: selection.budgetUsed
+    },
+    promptContext: renderDiscoveredContext(selection.snapshots, discoveryGoals)
+  };
+}
+
+function renderUserPrompt(task: ImplementationTask, contextText: string, discoveredContext: string): string {
   return [
     `Implement accepted spec ${task.specId}.`,
     `Allowed paths: ${task.allowedPaths.join(", ")}.`,
@@ -378,11 +525,19 @@ function renderUserPrompt(task: ImplementationTask, contextText: string): string
     "If the task is blocked, start SUMMARY with 'Blocked:' and leave the PATCH section empty.",
     "",
     "Context bundle:",
-    contextText
+    contextText,
+    "",
+    discoveredContext
   ].join("\n");
 }
 
-function renderRepairPrompt(task: ImplementationTask, contextText: string, priorOutput: string, validationError: string): string {
+function renderRepairPrompt(
+  task: ImplementationTask,
+  contextText: string,
+  discoveredContext: string,
+  priorOutput: string,
+  validationError: string
+): string {
   return [
     `Your previous response for ${task.specId} was not a valid unified diff.`,
     `Validation error: ${validationError}`,
@@ -405,6 +560,8 @@ function renderRepairPrompt(task: ImplementationTask, contextText: string, prior
     "Original context bundle:",
     contextText,
     "",
+    discoveredContext,
+    "",
     `Allowed paths: ${task.allowedPaths.join(", ")}.`,
     `Blocked paths: ${task.policy.blockedPaths.join(", ")}.`,
     "If you are blocked, start SUMMARY with 'Blocked:' and leave PATCH empty.",
@@ -415,6 +572,7 @@ function renderRepairPrompt(task: ImplementationTask, contextText: string, prior
 function renderApplyRepairPrompt(
   task: ImplementationTask,
   contextText: string,
+  discoveredContext: string,
   priorOutput: string,
   applyError: string,
   fileSnapshots: string
@@ -445,11 +603,216 @@ function renderApplyRepairPrompt(
     "Original context bundle:",
     contextText,
     "",
+    discoveredContext,
+    "",
     `Allowed paths: ${task.allowedPaths.join(", ")}.`,
     `Blocked paths: ${task.policy.blockedPaths.join(", ")}.`,
     "Do not modify unrelated files such as README.md unless the spec explicitly requires it.",
     "If you are editing an existing file, do not use 'new file mode', '/dev/null', or '@@ -0,0' headers."
   ].join("\n");
+}
+
+function parseContextBundleMetadata(contextText: string): ParsedContextBundle | null {
+  const match = contextText.match(/## Discovery Metadata\s+```json\n([\s\S]*?)\n```/i);
+  if (!match?.[1]) {
+    return null;
+  }
+  try {
+    return JSON.parse(match[1]) as ParsedContextBundle;
+  } catch {
+    return null;
+  }
+}
+
+async function listRepoFiles(worktreePath: string, readPaths: string[]): Promise<string[]> {
+  const tracked = await execGit(worktreePath, ["ls-files"]);
+  return tracked.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((path) => !isIgnoredDiscoveryPath(path))
+    .filter((path) => matchesAny(path, readPaths));
+}
+
+function isIgnoredDiscoveryPath(path: string): boolean {
+  return [
+    ".git/",
+    "node_modules/",
+    "dist/",
+    "coverage/",
+    "var/",
+    "reports/"
+  ].some((prefix) => path.startsWith(prefix));
+}
+
+function extractDiscoveryKeywords(parsedContext: ParsedContextBundle | null): string[] {
+  const text = [
+    parsedContext?.spec.specId,
+    parsedContext?.spec.title,
+    parsedContext?.spec.intent,
+    parsedContext?.spec.riskNotes,
+    ...(parsedContext?.spec.scenarios.map((scenario) => scenario.description) ?? []),
+    ...(parsedContext?.context?.discoveryGoals ?? []),
+    ...(parsedContext?.context?.reviewNotes ?? [])
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const stopWords = new Set([
+    "about", "after", "agent", "alongside", "be", "break", "capabilities", "current", "deterministic",
+    "does", "evidence", "existing", "factory", "feature", "files", "find", "for", "from", "game",
+    "goals", "ground", "have", "implementation", "inside", "integration", "keep", "leave", "main",
+    "must", "not", "notes", "only", "paths", "placement", "project", "required", "review", "runs",
+    "safe", "scenarios", "should", "spec", "stable", "tests", "that", "the", "their", "them", "this",
+    "turn", "update", "verification", "worker"
+  ]);
+  const tokens = text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4 && !stopWords.has(token));
+
+  return [...new Set(tokens)].slice(0, 16);
+}
+
+async function searchFilesByKeyword(worktreePath: string, keywords: string[]): Promise<Set<string>> {
+  if (keywords.length === 0) {
+    return new Set();
+  }
+
+  const args = ["grep", "-il"];
+  for (const keyword of keywords.slice(0, 8)) {
+    args.push("-e", keyword);
+  }
+  args.push("--");
+
+  try {
+    const result = await execGit(worktreePath, args);
+    return new Set(
+      result.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter((path) => !isIgnoredDiscoveryPath(path))
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function scoreDiscoveryCandidates(
+  repoFiles: string[],
+  seedFiles: string[],
+  contentMatches: Set<string>,
+  keywords: string[]
+): FileCandidate[] {
+  const seedSet = new Set(seedFiles);
+  const seedDirectories = new Set(seedFiles.map((path) => dirname(path)).filter(Boolean));
+
+  return repoFiles.map((path) => {
+    let score = 0;
+    const reasons: string[] = [];
+    const normalized = path.toLowerCase();
+
+    if (seedSet.has(path)) {
+      score += 100;
+      reasons.push("seed file");
+    }
+    if ([...seedDirectories].some((directory) => directory !== "." && path.startsWith(`${directory}/`))) {
+      score += 40;
+      reasons.push("adjacent to seed file");
+    }
+    if (contentMatches.has(path)) {
+      score += 35;
+      reasons.push("matches discovery keywords in file contents");
+    }
+    const matchingKeywords = keywords.filter((keyword) => normalized.includes(keyword));
+    if (matchingKeywords.length > 0) {
+      score += Math.min(30, matchingKeywords.length * 10);
+      reasons.push(`path matches keywords: ${matchingKeywords.slice(0, 3).join(", ")}`);
+    }
+    if (/(simulation|terrain|determin|projectile|render|match|spawn|evidence|test|scenario)/.test(normalized)) {
+      score += 15;
+      reasons.push("path suggests relevant integration surface");
+    }
+    if ([".ts", ".tsx", ".json", ".md"].includes(extname(path))) {
+      score += 5;
+    }
+
+    return { path, score, reasons };
+  }).filter((candidate) => candidate.score > 10)
+    .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path));
+}
+
+async function selectContextFiles(
+  worktreePath: string,
+  candidates: FileCandidate[],
+  discoveryBudget: ImplementationDiscoveryBudget
+): Promise<{
+  readFiles: string[];
+  selectedFiles: string[];
+  selectionReasons: Record<string, string>;
+  budgetUsed: { files: number; bytes: number };
+  snapshots: string[];
+}> {
+  const selectionReasons: Record<string, string> = {};
+  const readFiles: string[] = [];
+  const selectedFiles: string[] = [];
+  const snapshots: string[] = [];
+  let bytes = 0;
+
+  for (const candidate of candidates) {
+    if (selectedFiles.length >= discoveryBudget.maxFiles) {
+      break;
+    }
+
+    try {
+      const contents = await readFile(join(worktreePath, candidate.path), "utf8");
+      const contentBytes = Buffer.byteLength(contents);
+      readFiles.push(candidate.path);
+      if (bytes + contentBytes > discoveryBudget.maxBytes && selectedFiles.length > 0) {
+        continue;
+      }
+
+      selectedFiles.push(candidate.path);
+      selectionReasons[candidate.path] = candidate.reasons.join("; ") || "selected by discovery";
+      bytes += contentBytes;
+      snapshots.push([
+        `FILE: ${candidate.path}`,
+        `REASON: ${selectionReasons[candidate.path]}`,
+        "```",
+        truncate(contents, 8000),
+        "```"
+      ].join("\n"));
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    readFiles,
+    selectedFiles,
+    selectionReasons,
+    budgetUsed: {
+      files: selectedFiles.length,
+      bytes
+    },
+    snapshots
+  };
+}
+
+function renderDiscoveredContext(snapshots: string[], discoveryGoals: string[]): string {
+  return [
+    "## Discovery Goals",
+    ...(discoveryGoals.length > 0 ? discoveryGoals.map((goal) => `- ${goal}`) : ["- No explicit discovery goals supplied."]),
+    "",
+    "## Selected Repository Context",
+    ...(snapshots.length > 0 ? snapshots : ["No repository context selected."])
+  ].join("\n");
+}
+
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths.filter(Boolean))];
 }
 
 async function requestCodexResponse(apiKey: string, task: ImplementationTask, branch: string, prompt: string): Promise<ParsedCodexResponse> {
@@ -632,6 +995,21 @@ async function buildFileSnapshots(worktreePath: string, paths: string[]): Promis
   return snapshots.join("\n\n");
 }
 
+function matchesAny(path: string, patterns: string[]): boolean {
+  if (patterns.length === 0) {
+    return false;
+  }
+  return patterns.some((pattern) => {
+    if (pattern === "**") {
+      return true;
+    }
+    if (pattern.endsWith("/**")) {
+      return path.startsWith(pattern.slice(0, -3));
+    }
+    return path === pattern;
+  });
+}
+
 function estimateCost(inputTokens: number, outputTokens: number): number {
   return Number((((inputTokens / 1_000_000) * 1.25) + ((outputTokens / 1_000_000) * 10)).toFixed(6));
 }
@@ -656,7 +1034,14 @@ export const codexProviderInternals = {
   checkPatchText,
   classifyBlockedResponse,
   isLikelyUnifiedDiff,
+  parseContextBundleMetadata,
+  listRepoFiles,
+  extractDiscoveryKeywords,
+  scoreDiscoveryCandidates,
+  selectContextFiles,
+  renderDiscoveredContext,
   renderRepairPrompt,
   renderApplyRepairPrompt,
-  extractPatchedPaths
+  extractPatchedPaths,
+  matchesAny
 };

@@ -69,8 +69,13 @@ async function route(request: IncomingMessage, response: ServerResponse, store: 
       store.getDeployments(25),
       store.listImplementationTasks()
     ]);
+    const taskDetails = await Promise.all(tasks.slice(0, 25).map(async (task) => ({
+      task,
+      run: task.runId ? await store.getImplementationRun(task.runId) : null,
+      artifact: task.runId ? await store.getImplementationArtifact(task.runId) : null
+    })));
 
-    await writeHtml(response, 200, renderDashboard(factory, agents, deployments, tasks));
+    await writeHtml(response, 200, renderDashboard(factory, agents, deployments, taskDetails));
     return;
   }
 
@@ -292,7 +297,11 @@ function renderDashboard(
   factory: FactoryAdminStatus,
   agents: AgentQualityStatus,
   deployments: Array<Record<string, unknown>>,
-  tasks: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["listImplementationTasks"]>>
+  taskDetails: Array<{
+    task: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["listImplementationTasks"]>>[number];
+    run: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["getImplementationRun"]>>;
+    artifact: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["getImplementationArtifact"]>>;
+  }>
 ): string {
   const statusClass = factory.status === "ok" ? "ok" : "degraded";
   const deploymentRows = deployments.length > 0
@@ -304,9 +313,20 @@ function renderDashboard(
       return `<tr><td>${at}</td><td>${specId}</td><td>${deployId}</td><td class="metadata">${metadata}</td></tr>`;
     }).join("")
     : `<tr><td colspan="4" class="empty">No deployments recorded.</td></tr>`;
-  const taskRows = tasks.length > 0
-    ? tasks.slice(0, 25).map((task) => `<tr><td>${escapeHtml(task.specId)}</td><td>${escapeHtml(task.status)}</td><td>${escapeHtml(task.provider ?? "")}</td><td>${escapeHtml(task.model ?? "")}</td><td>${escapeHtml(task.updatedAt)}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="empty">No implementation tasks recorded.</td></tr>`;
+  const taskRows = taskDetails.length > 0
+    ? taskDetails.map(({ task, run }) => {
+      const discovery = run?.discovery;
+      const discoverySummary = discovery
+        ? [
+            `selected=${discovery.selectedContextFiles.length}`,
+            `read=${discovery.readFiles.length}`,
+            discovery.blockedReason ? `blocked=${discovery.blockedReason}` : ""
+          ].filter(Boolean).join(" | ")
+        : "";
+      const selected = discovery?.selectedContextFiles?.slice(0, 5).join(", ") ?? "";
+      return `<tr><td>${escapeHtml(task.specId)}</td><td>${escapeHtml(task.status)}</td><td>${escapeHtml(task.provider ?? "")}</td><td>${escapeHtml(task.model ?? "")}</td><td>${escapeHtml(task.updatedAt)}</td><td class="metadata">${escapeHtml(discoverySummary)}</td><td class="metadata">${escapeHtml(selected)}</td></tr>`;
+    }).join("")
+    : `<tr><td colspan="7" class="empty">No implementation tasks recorded.</td></tr>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -358,7 +378,7 @@ function renderDashboard(
       <article class="card"><div class="label">Regression Rate</div><div class="value">${agents.regressionRate.toFixed(2)}</div></article>
     </section>
     <section class="card"><h2>Recent Deployments</h2><table><thead><tr><th>At</th><th>Spec</th><th>Deploy</th><th>Metadata</th></tr></thead><tbody>${deploymentRows}</tbody></table></section>
-    <section class="card"><h2>Implementation Tasks</h2><table><thead><tr><th>Spec</th><th>Status</th><th>Provider</th><th>Model</th><th>Updated</th></tr></thead><tbody>${taskRows}</tbody></table></section>
+    <section class="card"><h2>Implementation Tasks</h2><table><thead><tr><th>Spec</th><th>Status</th><th>Provider</th><th>Model</th><th>Updated</th><th>Discovery</th><th>Selected Files</th></tr></thead><tbody>${taskRows}</tbody></table></section>
   </div>
 </body>
 </html>`;

@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createTempWorkspace, readJson } from "./helpers.js";
+import { buildArtilleryImplementationContext } from "../packages/project-adapter-artillery/src/context.js";
 import { generateArtilleryScenarioEvidence } from "../packages/project-adapter-artillery/src/evidence.js";
 import type { FeatureSpec } from "@darkfactory/contracts";
 
@@ -59,4 +61,22 @@ test("artillery adapter records unsupported scenarios as failed evidence", async
   assert.equal(evidence[0]?.passed, false);
   const stored = await readJson<{ details: { reason: string } }>(join(workspace, "evidence", spec.specId, "SCN-0999.json"));
   assert.match(stored.details.reason, /No project adapter verifier/);
+});
+
+test("artillery implementation context includes terrain discovery hints for SPEC-0003", async () => {
+  const workspace = await createTempWorkspace();
+  const spec: FeatureSpec = {
+    ...makeSpec(["SCN-0301", "SCN-0302"]),
+    specId: "SPEC-0003",
+    title: "High resolution terrain"
+  };
+  await writeFile(join(workspace, "specs", "SPEC-0003.json"), `${JSON.stringify(spec, null, 2)}\n`, "utf8");
+
+  const context = await buildArtilleryImplementationContext(join(workspace, "specs"), "SPEC-0003");
+
+  assert.deepEqual(context.readPaths, ["**"]);
+  assert.match(context.seedFiles.join(","), /simulation\.ts/);
+  assert.match(context.discoveryGoals.join(" "), /terrain height/);
+  assert.match(context.reviewNotes.join(" "), /deterministic/);
+  assert.equal(context.discoveryBudget.maxFiles, 40);
 });
