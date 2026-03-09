@@ -23,3 +23,5 @@ Each scenario evidence JSON should include:
 - `passed` (`true`/`false`)
 - `at` (ISO timestamp)
 - `artifact` (optional path or report id)
+
+Store any supporting visual baselines or perf logs next to the scenario JSON so review remains one-hop from the spec.
