@@ -71,6 +71,18 @@ jobs:
           git add -f var/factory/state.json
           git commit -m "chore(factory): record architecture worker state"
           git push
+      - name: Trigger spec execution handoff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ ! -f reports/spec-architecture/latest.json ]; then
+            exit 0
+          fi
+          ADVANCED_COUNT="$(jq '(.advanced // []) | length' reports/spec-architecture/latest.json)"
+          if [ "${ADVANCED_COUNT}" = "0" ]; then
+            exit 0
+          fi
+          gh workflow run spec-execution.yml --ref main
       - name: Upload architecture manifest
         uses: actions/upload-artifact@v4
         with:

@@ -196,7 +196,7 @@ Architecture artifacts:
 
 ## Spec Execution (Post-Merge Automation)
 
-`spec-execution.yml` runs on trusted `main` pushes after a spec is `Architected`.
+`spec-architecture.yml` now dispatches `spec-execution.yml` after it advances one or more specs to `Architected`, so implementation starts reliably even when the architecture state is recorded by `GITHUB_TOKEN`.
 
 - Enqueues accepted `Architected` specs into the factory implementation queue.
 - Builds a project-scoped implementation context from the artillery adapter plus architecture artifacts.

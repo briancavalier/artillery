@@ -36,7 +36,7 @@ Centralized events:
 
 - Accepted specs merged to `main` trigger `spec-architecture.yml`.
 - Architecture tasks publish repo-tracked artifacts and advance specs to `Architected`.
-- `Architected` specs trigger `spec-execution.yml`.
+- `spec-architecture.yml` explicitly dispatches `spec-execution.yml` after it advances any spec to `Architected`.
 - Spec execution enqueues implementation tasks in factory storage and emits implementation telemetry.
 - The Codex worker opens or reuses draft implementation PRs for pending code work.
 - The worker writes evidence files, merges passing PRs, and then advances specs through `Implemented` and `Verified`.
