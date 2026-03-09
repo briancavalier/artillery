@@ -44,6 +44,9 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-codex' }}
+          OPENAI_REQUEST_TIMEOUT_MS: 120000
+          OPENAI_REQUEST_MAX_ATTEMPTS: 4
+          OPENAI_REQUEST_BACKOFF_MS: 1500
           DEPLOY_ID: run-${{ github.run_id }}-spec-execution
           FACTORY_API_BASE_URL: ${{ vars.PROD_FACTORY_API_BASE_URL || vars.PRODUCTION_FACTORY_API_BASE_URL || vars.STAGING_FACTORY_API_BASE_URL }}
         run: npm run factory:spec-execution
