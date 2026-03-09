@@ -1,0 +1,10 @@
+{
+  "scenarioId": "SCN-0303",
+  "passed": false,
+  "at": "2026-03-09T01:01:34.113Z",
+  "artifact": "/home/runner/work/artillery/artillery/evidence/SPEC-0003/SCN-0303.json",
+  "details": {
+    "passed": false,
+    "reason": "No project adapter verifier is implemented for this scenario yet."
+  }
+}
