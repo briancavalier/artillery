@@ -3,18 +3,58 @@ import { dirname, join } from "node:path";
 import type { FeatureSpec } from "@darkfactory/contracts";
 import type { ArchitectureContext, ArchitectureScope, ImplementationContext, ImplementationScope } from "@darkfactory/core";
 
+interface ArchitectureIntegrationPoint {
+  path: string;
+  role: string;
+  writeIntent: "edit" | "read-only";
+  priority: number;
+}
+
+export async function buildArtilleryArchitectureContext(specDir: string, specId: string): Promise<ArchitectureContext> {
+  const spec = await loadSpec(specDir, specId);
+  const repoRoot = dirname(specDir);
+  const relevantFiles = await collectSeedFiles(repoRoot, spec);
+  return {
+    specId,
+    relevantFiles,
+    readPaths: ["**"],
+    seedFiles: relevantFiles,
+    discoveryGoals: buildDiscoveryGoals(spec),
+    discoveryBudget: {
+      maxFiles: 32,
+      maxBytes: 160_000
+    },
+    artifactRoot: `architecture/${specId}`,
+    blockedPaths: [
+      "apps/**",
+      "packages/factory-core/**",
+      "packages/factory-runner/**",
+      ".github/workflows/**",
+      "policy/**",
+      ".env*",
+      "render.yaml"
+    ],
+    reviewNotes: [
+      "Produce architecture artifacts only; do not edit runtime code.",
+      "Identify deterministic simulation seams before proposing terrain changes.",
+      "Scenario coverage must map every required scenario to files and evidence hooks.",
+      "Do not reference factory-plane mutation targets in architecture artifacts."
+    ]
+  };
+}
+
 export async function buildArtilleryImplementationContext(specDir: string, specId: string): Promise<ImplementationContext> {
   const spec = await loadSpec(specDir, specId);
+  const repoRoot = dirname(specDir);
   const scope = getArtilleryImplementationScope(specId);
-  const architecture = await readArchitectureArtifacts(dirname(specDir), specId);
+  const architectureArtifacts = await readArchitectureArtifacts(repoRoot, spec.specId);
   const seedFiles = unique([
-    ...(architecture?.integrationPoints.map((entry) => entry.path) ?? []),
-    ...(await collectSeedFiles(spec))
+    ...(architectureArtifacts.integrationPoints.map((entry) => entry.path)),
+    ...(await collectSeedFiles(repoRoot, spec))
   ]);
   const relevantFiles = unique([
-    ...(architecture?.artifactPaths ?? []),
-    ...(architecture?.integrationPoints.map((entry) => entry.path) ?? []),
-    ...(await collectRelevantFiles(spec))
+    ...architectureArtifacts.artifactPaths,
+    ...(await collectRelevantFiles(repoRoot, spec))
   ]);
 
   return {
@@ -24,7 +64,7 @@ export async function buildArtilleryImplementationContext(specDir: string, specI
     seedFiles,
     discoveryGoals: buildDiscoveryGoals(spec),
     discoveryBudget: {
-      maxFiles: architecture?.integrationPoints.length ? 24 : 40,
+      maxFiles: architectureArtifacts.integrationPoints.length > 0 ? 24 : 40,
       maxBytes: 200_000
     },
     allowedPaths: scope.allowedPaths,
@@ -46,31 +86,30 @@ export async function buildArtilleryImplementationContext(specDir: string, specI
       "Terrain changes must remain deterministic across replay and verification runs.",
       "Spawn placement must remain fair and on stable ground.",
       "Crater deformation must be replay-stable and must not break turn responsiveness.",
-      ...(architecture?.invariants.map((entry) => `Architecture invariant: ${entry}`) ?? [])
+      ...architectureArtifacts.invariants.map((entry) => `${entry.id}: ${entry.description}`)
     ],
     maxFilesChanged: scope.maxFilesChanged
   };
 }
 
-export async function buildArtilleryArchitectureContext(specDir: string, specId: string): Promise<ArchitectureContext> {
-  const spec = await loadSpec(specDir, specId);
-  const scope = getArtilleryArchitectureScope(specId);
-  const seeds = await collectSeedFiles(spec);
+export function getArtilleryArchitectureScope(specId: string): ArchitectureScope {
   return {
-    specId,
-    relevantFiles: await collectRelevantFiles(spec),
-    readPaths: ["**"],
-    seedFiles: seeds,
-    discoveryGoals: buildDiscoveryGoals(spec),
-    reviewNotes: [
-      "Architecture output must stay under architecture/<SpecID>/ only.",
-      "List concrete integration points with ranked priority and write intent.",
-      "List invariants the implementation worker must preserve.",
-      "Cover every required scenario in the scenario trace artifact.",
-      "Do not propose edits to factory-plane packages, workflows, or policy files."
+    artifactRoot: `architecture/${specId}`,
+    allowedPaths: [
+      `architecture/${specId}/**`,
+      `specs/${specId}.json`,
+      "reports/architecture/**"
     ],
-    artifactRoot: scope.artifactRoot,
-    blockedPaths: scope.blockedPaths
+    blockedPaths: [
+      "apps/**",
+      "packages/factory-core/**",
+      "packages/factory-runner/**",
+      ".github/workflows/**",
+      "policy/**",
+      ".env*",
+      "render.yaml"
+    ],
+    maxFilesRead: 32
   };
 }
 
@@ -96,25 +135,7 @@ export function getArtilleryImplementationScope(specId: string): ImplementationS
   };
 }
 
-export function getArtilleryArchitectureScope(specId: string): ArchitectureScope {
-  return {
-    artifactRoot: `architecture/${specId}`,
-    blockedPaths: [
-      "apps/factory-api/**",
-      "packages/factory-core/**",
-      "packages/factory-runner/**",
-      "packages/implementation-provider-codex/**",
-      "apps/artillery-game/**",
-      "tests/**",
-      ".github/workflows/**",
-      "policy/**",
-      ".env*",
-      "render.yaml"
-    ]
-  };
-}
-
-async function collectRelevantFiles(spec: FeatureSpec): Promise<string[]> {
+async function collectRelevantFiles(repoRoot: string, spec: FeatureSpec): Promise<string[]> {
   const candidates = [
     ...baseRelevantFiles(spec.specId),
     ...(spec.specId === "SPEC-0003" ? terrainDiscoverySeeds() : [])
@@ -122,26 +143,66 @@ async function collectRelevantFiles(spec: FeatureSpec): Promise<string[]> {
 
   const files = new Set<string>();
   for (const candidate of candidates) {
-    if (await exists(candidate)) {
+    if (await exists(repoRoot, candidate)) {
       files.add(candidate);
     }
   }
 
-  await mkdir(join(process.cwd(), "evidence", spec.specId), { recursive: true }).catch(() => undefined);
+  await mkdir(join(repoRoot, "evidence", spec.specId), { recursive: true }).catch(() => undefined);
   return [...files];
 }
 
-async function collectSeedFiles(spec: FeatureSpec): Promise<string[]> {
+async function collectSeedFiles(repoRoot: string, spec: FeatureSpec): Promise<string[]> {
   const files = new Set<string>();
   for (const candidate of [
     ...baseRelevantFiles(spec.specId),
     ...(spec.specId === "SPEC-0003" ? terrainDiscoverySeeds() : [])
   ]) {
-    if (await exists(candidate)) {
+    if (await exists(repoRoot, candidate)) {
       files.add(candidate);
     }
   }
   return [...files];
+}
+
+async function readArchitectureArtifacts(repoRoot: string, specId: string): Promise<{
+  integrationPoints: ArchitectureIntegrationPoint[];
+  invariants: Array<{ id: string; description: string }>;
+  artifactPaths: string[];
+}> {
+  const artifactRoot = `architecture/${specId}`;
+  const integrationPointsPath = join(repoRoot, artifactRoot, "integration-points.json");
+  const invariantsPath = join(repoRoot, artifactRoot, "invariants.json");
+  const artifactCandidates = [
+    `${artifactRoot}/README.md`,
+    `${artifactRoot}/integration-points.json`,
+    `${artifactRoot}/invariants.json`,
+    `${artifactRoot}/scenario-trace.json`
+  ];
+
+  try {
+    const [integrationPointsRaw, invariantsRaw] = await Promise.all([
+      readFile(integrationPointsPath, "utf8"),
+      readFile(invariantsPath, "utf8")
+    ]);
+    const artifactPaths: string[] = [];
+    for (const candidate of artifactCandidates) {
+      if (await exists(repoRoot, candidate)) {
+        artifactPaths.push(candidate);
+      }
+    }
+    return {
+      integrationPoints: JSON.parse(integrationPointsRaw) as ArchitectureIntegrationPoint[],
+      invariants: JSON.parse(invariantsRaw) as Array<{ id: string; description: string }>,
+      artifactPaths
+    };
+  } catch {
+    return {
+      integrationPoints: [],
+      invariants: [],
+      artifactPaths: []
+    };
+  }
 }
 
 function buildDiscoveryGoals(spec: FeatureSpec): string[] {
@@ -206,50 +267,15 @@ async function loadSpec(specDir: string, specId: string): Promise<FeatureSpec> {
   throw new Error(`Spec not found: ${specId}`);
 }
 
-async function exists(path: string): Promise<boolean> {
+async function exists(rootDir: string, path: string): Promise<boolean> {
   try {
-    await access(path);
+    await access(join(rootDir, path));
     return true;
   } catch {
     return false;
   }
 }
 
-async function readArchitectureArtifacts(rootDir: string, specId: string): Promise<{
-  artifactPaths: string[];
-  integrationPoints: Array<{ path: string; role: string; writeIntent: "edit" | "read-only"; priority: number }>;
-  invariants: string[];
-} | null> {
-  const root = join(rootDir, "architecture", specId);
-  const artifactPaths = [
-    join("architecture", specId, "README.md"),
-    join("architecture", specId, "integration-points.json"),
-    join("architecture", specId, "invariants.json"),
-    join("architecture", specId, "scenario-trace.json")
-  ];
-  const existsAll = await Promise.all(artifactPaths.map((candidate) => exists(join(rootDir, candidate))));
-  if (existsAll.some((present) => !present)) {
-    return null;
-  }
-
-  try {
-    const integrationPoints = JSON.parse(await readFile(join(root, "integration-points.json"), "utf8")) as Array<{
-      path: string;
-      role: string;
-      writeIntent: "edit" | "read-only";
-      priority: number;
-    }>;
-    const invariants = JSON.parse(await readFile(join(root, "invariants.json"), "utf8")) as string[];
-    return {
-      artifactPaths,
-      integrationPoints,
-      invariants
-    };
-  } catch {
-    return null;
-  }
-}
-
-function unique(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))];
+function unique(paths: string[]): string[] {
+  return [...new Set(paths)];
 }

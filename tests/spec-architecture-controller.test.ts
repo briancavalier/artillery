@@ -21,6 +21,7 @@ class DummyArchitectureProvider implements ArchitectureProvider {
       result: "pr_opened",
       usage: { inputTokens: 10, outputTokens: 20, estimatedCostUsd: 0.001 },
       summary: "Architecture summary",
+      selectedFiles: ["apps/artillery-game/src/shared/simulation.ts"],
       metadata: {
         selectedContextFiles: ["apps/artillery-game/src/shared/simulation.ts"],
         requestDiagnostics: { attempts: [{ attempt: 1 }] }
@@ -37,6 +38,7 @@ class DummyArchitectureProvider implements ArchitectureProvider {
       prUrl: "https://example.test/pr/7",
       branch: "codex/architect-spec-arch-1",
       commitSha: "abc123",
+      artifactRoot: "architecture/SPEC-ARCH-1",
       filesChanged: [
         "architecture/SPEC-ARCH-1/README.md",
         "architecture/SPEC-ARCH-1/integration-points.json",
@@ -45,11 +47,12 @@ class DummyArchitectureProvider implements ArchitectureProvider {
       ],
       summaryMd: "Architecture summary",
       payload: {
-        readme: "Architecture summary",
+        readmeMd: "Architecture summary",
         integrationPoints: [{ path: "apps/artillery-game/src/shared/simulation.ts", role: "simulation", writeIntent: "edit", priority: 1 }],
-        invariants: ["Keep deterministic state hashing stable."],
-        scenarioTrace: [{ scenarioId: "SCN-ARCH-1", filePaths: ["apps/artillery-game/src/shared/simulation.ts"], evidenceHooks: ["integration"] }]
-      }
+        invariants: [{ id: "INV-ARCH-1", description: "Keep deterministic state hashing stable.", category: "determinism" }],
+        scenarioTrace: [{ scenarioId: "SCN-ARCH-1", paths: ["apps/artillery-game/src/shared/simulation.ts"], evidenceHooks: ["integration"] }]
+      },
+      selectedFiles: ["apps/artillery-game/src/shared/simulation.ts"]
     };
   }
 }

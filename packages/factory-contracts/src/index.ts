@@ -113,12 +113,12 @@ export interface FactoryAdminStatus {
     gateFailures: number;
     deploymentsToday: number;
     rollbacksToday: number;
-    implementationQueueDepth?: number;
-    implementationMergedToday?: number;
-    implementationBlockedToday?: number;
     architectureQueueDepth?: number;
     architectureMergedToday?: number;
     architectureBlockedToday?: number;
+    implementationQueueDepth?: number;
+    implementationMergedToday?: number;
+    implementationBlockedToday?: number;
   };
 }
 
@@ -130,16 +130,15 @@ export interface AgentQualityStatus {
   regressionRate: number;
 }
 
-export type ImplementationTaskStatus =
+export type ArchitectureTaskStatus =
   | "queued"
   | "running"
-  | "merge_ready"
   | "blocked"
   | "failed"
   | "merged"
   | "aborted";
 
-export type ImplementationRunStatus =
+export type ArchitectureRunStatus =
   | "queued"
   | "running"
   | "completed"
@@ -147,7 +146,119 @@ export type ImplementationRunStatus =
   | "blocked"
   | "canceled";
 
-export type ImplementationResult = "blocked" | "failed" | "pr_opened" | "merged" | "merge_ready";
+export type ArchitectureResult = "blocked" | "failed" | "pr_opened" | "merged";
+
+export interface ArchitectureTaskLimits {
+  maxDurationMs: number;
+  maxCostUsd: number;
+  maxFilesRead: number;
+}
+
+export interface ArchitectureTaskPolicy {
+  allowAutoMerge: boolean;
+  allowNetwork: boolean;
+  blockedPaths: string[];
+}
+
+export interface ArchitectureArtifactPayload {
+  readmeMd: string;
+  integrationPoints: {
+    path: string;
+    role: string;
+    writeIntent: "edit" | "read-only";
+    priority: number;
+  }[];
+  invariants: {
+    id: string;
+    description: string;
+    category: "determinism" | "fairness" | "performance" | "safety" | "protocol" | "testing";
+  }[];
+  scenarioTrace: {
+    scenarioId: string;
+    paths: string[];
+    evidenceHooks: string[];
+  }[];
+}
+
+export interface ArchitectureTask {
+  taskId: string;
+  specId: string;
+  source: string;
+  owner: string;
+  repo: string;
+  baseBranch: string;
+  baseSha: string;
+  targetBranch: string;
+  artifactRoot: string;
+  contextBundleRef: string;
+  priority: number;
+  attempt: number;
+  limits: ArchitectureTaskLimits;
+  policy: ArchitectureTaskPolicy;
+  status: ArchitectureTaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  runId?: string;
+  provider?: string;
+  model?: string;
+  prNumber?: number;
+  prUrl?: string;
+  branch?: string;
+  blockedReason?: string;
+  failedReason?: string;
+}
+
+export interface ArchitectureUsage {
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostUsd: number;
+}
+
+export interface ArchitectureRun {
+  runId: string;
+  taskId: string;
+  provider: string;
+  model: string;
+  status: ArchitectureRunStatus;
+  startedAt: string;
+  finishedAt?: string;
+  traceId?: string;
+  usage: ArchitectureUsage;
+  result?: ArchitectureResult;
+  summary?: string;
+  selectedFiles: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface ArchitectureArtifact {
+  runId: string;
+  taskId: string;
+  prNumber: number;
+  prUrl: string;
+  branch: string;
+  commitSha: string;
+  filesChanged: string[];
+  artifactRoot: string;
+  summaryMd: string;
+  payload: ArchitectureArtifactPayload;
+  selectedFiles: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface ArchitectureTaskRequest {
+  specId: string;
+  source: string;
+  owner: string;
+  repo: string;
+  baseBranch: string;
+  baseSha: string;
+  targetBranch: string;
+  artifactRoot: string;
+  contextBundleRef: string;
+  priority: number;
+  limits: ArchitectureTaskLimits;
+  policy: ArchitectureTaskPolicy;
+}
 
 export interface ImplementationTaskLimits {
   maxTurns: number;
@@ -183,6 +294,25 @@ export interface ImplementationDiscoveryTrace {
   budgetUsed: ImplementationDiscoveryUsage;
 }
 
+export type ImplementationTaskStatus =
+  | "queued"
+  | "running"
+  | "merge_ready"
+  | "blocked"
+  | "failed"
+  | "merged"
+  | "aborted";
+
+export type ImplementationRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "canceled";
+
+export type ImplementationResult = "blocked" | "failed" | "pr_opened" | "merged" | "merge_ready";
+
 export interface ImplementationTask {
   taskId: string;
   specId: string;
@@ -210,12 +340,59 @@ export interface ImplementationTask {
   branch?: string;
   blockedReason?: string;
   failedReason?: string;
+  planId?: string;
+  sliceId?: string;
+  sliceIndex?: number;
+  totalSlices?: number;
 }
 
 export interface ImplementationUsage {
   inputTokens: number;
   outputTokens: number;
   estimatedCostUsd: number;
+}
+
+export interface ImplementationPlanSlice {
+  sliceId: string;
+  title: string;
+  goal: string;
+  targetFiles: string[];
+  expectedTests: string[];
+  expectedEvidence: string[];
+  writeScope: string[];
+  dependsOnSliceIds: string[];
+}
+
+export interface ImplementationPlanningRun {
+  runId: string;
+  taskId: string;
+  provider: string;
+  model: string;
+  status: ImplementationRunStatus;
+  startedAt: string;
+  finishedAt?: string;
+  traceId?: string;
+  usage: ImplementationUsage;
+  result?: "blocked" | "failed" | "planned";
+  summary?: string;
+  discovery?: ImplementationDiscoveryTrace;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ImplementationPlanArtifact {
+  runId: string;
+  taskId: string;
+  planId: string;
+  specId: string;
+  summary: string;
+  targetFiles: string[];
+  testFiles: string[];
+  evidenceTargets: string[];
+  slices: ImplementationPlanSlice[];
+  risks: string[];
+  blockedReason?: string;
+  selectedContextFiles: string[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface ImplementationRun {
@@ -249,6 +426,7 @@ export interface ImplementationArtifact {
   };
   evidenceRefs: string[];
   summaryMd: string;
+  sliceId?: string;
   discovery?: ImplementationDiscoveryTrace;
   metadata?: Record<string, unknown>;
 }
@@ -267,127 +445,10 @@ export interface ImplementationTaskRequest {
   priority: number;
   limits: ImplementationTaskLimits;
   policy: ImplementationTaskPolicy;
-}
-
-export type ArchitectureTaskStatus =
-  | "queued"
-  | "running"
-  | "blocked"
-  | "failed"
-  | "merged"
-  | "aborted";
-
-export type ArchitectureRunStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed"
-  | "blocked"
-  | "canceled";
-
-export type ArchitectureResult = "blocked" | "failed" | "pr_opened" | "merged";
-
-export interface ArchitectureTaskLimits {
-  maxDurationMs: number;
-  maxCostUsd: number;
-}
-
-export interface ArchitectureTaskPolicy {
-  allowAutoMerge: boolean;
-  blockedPaths: string[];
-}
-
-export interface ArchitectureTask {
-  taskId: string;
-  specId: string;
-  source: string;
-  owner: string;
-  repo: string;
-  baseBranch: string;
-  baseSha: string;
-  targetBranch: string;
-  artifactRoot: string;
-  contextBundleRef: string;
-  attempt: number;
-  priority: number;
-  limits: ArchitectureTaskLimits;
-  policy: ArchitectureTaskPolicy;
-  status: ArchitectureTaskStatus;
-  createdAt: string;
-  updatedAt: string;
-  runId?: string;
-  provider?: string;
-  model?: string;
-  prNumber?: number;
-  prUrl?: string;
-  branch?: string;
-  blockedReason?: string;
-  failedReason?: string;
-}
-
-export interface ArchitectureUsage {
-  inputTokens: number;
-  outputTokens: number;
-  estimatedCostUsd: number;
-}
-
-export interface ArchitectureRun {
-  runId: string;
-  taskId: string;
-  provider: string;
-  model: string;
-  status: ArchitectureRunStatus;
-  startedAt: string;
-  finishedAt?: string;
-  traceId?: string;
-  usage: ArchitectureUsage;
-  result?: ArchitectureResult;
-  summary?: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface ArchitectureArtifactPayload {
-  readme: string;
-  integrationPoints: Array<{
-    path: string;
-    role: string;
-    writeIntent: "edit" | "read-only";
-    priority: number;
-  }>;
-  invariants: string[];
-  scenarioTrace: Array<{
-    scenarioId: string;
-    filePaths: string[];
-    evidenceHooks: string[];
-  }>;
-}
-
-export interface ArchitectureArtifact {
-  runId: string;
-  taskId: string;
-  prNumber: number;
-  prUrl: string;
-  branch: string;
-  commitSha: string;
-  filesChanged: string[];
-  summaryMd: string;
-  payload: ArchitectureArtifactPayload;
-  metadata?: Record<string, unknown>;
-}
-
-export interface ArchitectureTaskRequest {
-  specId: string;
-  source: string;
-  owner: string;
-  repo: string;
-  baseBranch: string;
-  baseSha: string;
-  targetBranch: string;
-  artifactRoot: string;
-  contextBundleRef: string;
-  priority: number;
-  limits: ArchitectureTaskLimits;
-  policy: ArchitectureTaskPolicy;
+  planId?: string;
+  sliceId?: string;
+  sliceIndex?: number;
+  totalSlices?: number;
 }
 
 export interface ArchitectureTaskListResponse {

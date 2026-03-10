@@ -36,17 +36,21 @@ interface ParsedArchitectureContext {
 }
 
 interface ArchitecturePayload {
-  readme: string;
+  readmeMd: string;
   integrationPoints: Array<{
     path: string;
     role: string;
     writeIntent: "edit" | "read-only";
     priority: number;
   }>;
-  invariants: string[];
+  invariants: Array<{
+    id: string;
+    description: string;
+    category: "determinism" | "fairness" | "performance" | "safety" | "protocol" | "testing";
+  }>;
   scenarioTrace: Array<{
     scenarioId: string;
-    filePaths: string[];
+    paths: string[];
     evidenceHooks: string[];
   }>;
 }
@@ -82,7 +86,8 @@ export class CodexArchitectureProvider implements ArchitectureProvider {
         inputTokens: 0,
         outputTokens: 0,
         estimatedCostUsd: 0
-      }
+      },
+      selectedFiles: []
     };
     this.runs.set(runId, { run, artifact: null });
 
@@ -135,7 +140,7 @@ export class CodexArchitectureProvider implements ArchitectureProvider {
         task,
         worktreePath,
         payload: response.payload,
-        summaryText: response.payload.readme,
+        summaryText: response.payload.readmeMd,
         runId
       });
 
@@ -145,8 +150,9 @@ export class CodexArchitectureProvider implements ArchitectureProvider {
         finishedAt: new Date().toISOString(),
         result: "pr_opened",
         traceId: responseId,
-        summary: response.payload.readme,
+        summary: response.payload.readmeMd,
         usage: response.usage,
+        selectedFiles: discovery.selectedContextFiles,
         metadata: {
           selectedContextFiles: discovery.selectedContextFiles,
           requestDiagnostics: diagnostics,
@@ -270,7 +276,13 @@ async function discoverArchitectureContext(worktreePath: string, contextText: st
   const repoFiles = await codexProviderInternals.listRepoFiles(worktreePath, readPaths);
   const contentMatches = new Set<string>();
   const candidates = codexProviderInternals.scoreDiscoveryCandidates(repoFiles, seedFiles, contentMatches, keywords);
-  const selection = await codexProviderInternals.selectContextFiles(worktreePath, candidates, { maxFiles: 24, maxBytes: 160_000 });
+  const selection = await codexProviderInternals.selectContextFiles(
+    worktreePath,
+    candidates,
+    { maxFiles: 24, maxBytes: 160_000 },
+    seedFiles,
+    Number.MAX_SAFE_INTEGER
+  );
   return {
     selectedContextFiles: selection.selectedFiles,
     promptContext: codexProviderInternals.renderDiscoveredContext(selection.snapshots, parsed?.context?.discoveryGoals ?? [])
@@ -293,9 +305,10 @@ function renderArchitectPrompt(task: ArchitectureTask, contextText: string, disc
   return [
     `Investigate accepted spec ${task.specId} and produce architecture artifacts only.`,
     `You may write only under ${task.artifactRoot}.`,
-    "Return JSON only with keys: readme, integrationPoints, invariants, scenarioTrace.",
+    "Return JSON only with keys: readmeMd, integrationPoints, invariants, scenarioTrace.",
     "integrationPoints entries must include path, role, writeIntent, priority.",
-    "scenarioTrace entries must include scenarioId, filePaths, evidenceHooks.",
+    "invariants entries must include id, description, category.",
+    "scenarioTrace entries must include scenarioId, paths, evidenceHooks.",
     "Do not produce a patch.",
     "",
     contextText,
@@ -307,7 +320,7 @@ function renderArchitectPrompt(task: ArchitectureTask, contextText: string, disc
 function renderArchitectRepairPrompt(contextText: string, discoveredContext: string, priorOutput: string): string {
   return [
     "Your previous response was not valid architecture JSON.",
-    "Return JSON only with keys: readme, integrationPoints, invariants, scenarioTrace.",
+    "Return JSON only with keys: readmeMd, integrationPoints, invariants, scenarioTrace.",
     "Do not wrap the JSON in markdown fences.",
     "",
     "Previous invalid output:",
@@ -322,7 +335,7 @@ function renderArchitectRepairPrompt(contextText: string, discoveredContext: str
 function parseArchitecturePayload(rawText: string): ArchitecturePayload {
   try {
     const payload = JSON.parse(rawText) as ArchitecturePayload;
-    if (!payload.readme || !Array.isArray(payload.integrationPoints) || !Array.isArray(payload.invariants) || !Array.isArray(payload.scenarioTrace)) {
+    if (!payload.readmeMd || !Array.isArray(payload.integrationPoints) || !Array.isArray(payload.invariants) || !Array.isArray(payload.scenarioTrace)) {
       throw new Error("Architecture payload missing required fields");
     }
     return payload;
@@ -343,7 +356,7 @@ async function publishArchitectureArtifacts(params: {
 }): Promise<ArchitectureArtifact> {
   const artifactDir = join(params.worktreePath, params.task.artifactRoot);
   await mkdir(artifactDir, { recursive: true });
-  await writeFile(join(artifactDir, "README.md"), `${params.payload.readme.trim()}\n`, "utf8");
+  await writeFile(join(artifactDir, "README.md"), `${params.payload.readmeMd.trim()}\n`, "utf8");
   await writeFile(join(artifactDir, "integration-points.json"), `${JSON.stringify(params.payload.integrationPoints, null, 2)}\n`, "utf8");
   await writeFile(join(artifactDir, "invariants.json"), `${JSON.stringify(params.payload.invariants, null, 2)}\n`, "utf8");
   await writeFile(join(artifactDir, "scenario-trace.json"), `${JSON.stringify(params.payload.scenarioTrace, null, 2)}\n`, "utf8");
@@ -372,6 +385,7 @@ async function publishArchitectureArtifacts(params: {
     prUrl: pull.htmlUrl,
     branch: params.task.targetBranch,
     commitSha,
+    artifactRoot: params.task.artifactRoot,
     filesChanged: [
       `${params.task.artifactRoot}/README.md`,
       `${params.task.artifactRoot}/integration-points.json`,
@@ -380,6 +394,7 @@ async function publishArchitectureArtifacts(params: {
     ],
     summaryMd: params.summaryText,
     payload: params.payload,
+    selectedFiles: params.payload.integrationPoints.map((entry) => entry.path),
     metadata: {}
   };
 }

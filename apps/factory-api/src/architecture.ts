@@ -52,6 +52,8 @@ export async function enqueueApprovedSpecsForArchitecture(
 
     const scope = await adapter.getArchitectureScope?.(record.data.specId) ?? {
       artifactRoot: `architecture/${record.data.specId}`,
+      allowedPaths: [`architecture/${record.data.specId}/**`],
+      maxFilesRead: 32,
       blockedPaths: ["apps/**", "packages/**", ".github/workflows/**", "policy/**"]
     };
     const context = await adapter.buildArchitectureContext?.(record.data.specId);
@@ -69,10 +71,12 @@ export async function enqueueApprovedSpecsForArchitecture(
       priority: 100,
       limits: {
         maxDurationMs: Number(process.env.ARCHITECTURE_MAX_DURATION_MS ?? 900000),
-        maxCostUsd: Number(process.env.ARCHITECTURE_MAX_COST_USD ?? 5)
+        maxCostUsd: Number(process.env.ARCHITECTURE_MAX_COST_USD ?? 5),
+        maxFilesRead: scope.maxFilesRead ?? context?.discoveryBudget.maxFiles ?? 32
       },
       policy: {
         allowAutoMerge: process.env.ARCHITECTURE_ALLOW_AUTOMERGE !== "0",
+        allowNetwork: process.env.ARCHITECTURE_ALLOW_NETWORK !== "0",
         blockedPaths: context?.blockedPaths ?? scope.blockedPaths
       }
     });

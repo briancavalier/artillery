@@ -3,7 +3,16 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { CloudEventEnvelope, FeatureSpec, ImplementationArtifact, ImplementationRun, ImplementationTask } from "@darkfactory/contracts";
+import type {
+  CloudEventEnvelope,
+  FeatureSpec,
+  ImplementationArtifact,
+  ImplementationPlanArtifact,
+  ImplementationPlanSlice,
+  ImplementationPlanningRun,
+  ImplementationRun,
+  ImplementationTask
+} from "@darkfactory/contracts";
 import { runPipelineStep, type FactoryAdapter, type FactoryStorePort, type ImplementationProvider } from "@darkfactory/core";
 import { createArtilleryAdapter } from "@darkfactory/project-adapter-artillery";
 import { CodexImplementationProvider, GitHubAutomationApi } from "@darkfactory/implementation-provider-codex";
@@ -37,7 +46,7 @@ export async function enqueueAcceptedSpecs(
     }
 
     const existing = await store.findImplementationTaskBySpecId(record.data.specId);
-    if (existing && ["queued", "running", "merge_ready", "merged"].includes(existing.status)) {
+    if (existing && ["queued", "running", "merge_ready"].includes(existing.status)) {
       continue;
     }
 
@@ -56,6 +65,11 @@ export async function enqueueAcceptedSpecs(
       continue;
     }
     const contextBundleRef = await writeContextBundle(options.reportRootDir ?? process.cwd(), record.data, context);
+    const planArtifact = await store.findImplementationPlanArtifactBySpecId(record.data.specId);
+    const nextSlice = getNextSlice(planArtifact, existing);
+    if (planArtifact && !nextSlice && existing?.status === "merged") {
+      continue;
+    }
 
     const task = await store.enqueueImplementationTask({
       specId: record.data.specId,
@@ -65,7 +79,7 @@ export async function enqueueAcceptedSpecs(
       baseBranch: options.baseBranch,
       baseSha: options.baseSha,
       targetBranch: `codex/implement-${record.data.specId.toLowerCase()}`,
-      allowedPaths: context?.allowedPaths ?? scope.allowedPaths,
+      allowedPaths: nextSlice?.writeScope.length ? nextSlice.writeScope : (context?.allowedPaths ?? scope.allowedPaths),
       verificationTargets: record.data.scenarios.filter((scenario) => scenario.required).map((scenario) => scenario.id),
       contextBundleRef,
       priority: 100,
@@ -80,7 +94,11 @@ export async function enqueueAcceptedSpecs(
         allowShell: true,
         allowNetwork: false,
         blockedPaths: context?.blockedPaths ?? scope.blockedPaths
-      }
+      },
+      planId: planArtifact?.planId,
+      sliceId: nextSlice?.sliceId,
+      sliceIndex: nextSlice?.sliceIndex,
+      totalSlices: planArtifact?.slices.length
     });
     queued.push(task);
     await emit(adapter, options, "implementation_task_queued", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
@@ -99,6 +117,7 @@ export async function processImplementationQueue(
   options: SpecExecutionOptions
 ): Promise<ImplementationTask[]> {
   const processed: ImplementationTask[] = [];
+  const processedSpecs = new Set<string>();
 
   while (true) {
     const leased = await store.leaseImplementationTask();
@@ -107,6 +126,12 @@ export async function processImplementationQueue(
     }
 
     let task = leased;
+    if (processedSpecs.has(task.specId)) {
+      task.status = "queued";
+      task.updatedAt = new Date().toISOString();
+      await store.writeImplementationTask(task);
+      break;
+    }
     await emit(adapter, options, "implementation_task_started", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
       taskId: task.taskId,
       branch: task.targetBranch,
@@ -120,7 +145,114 @@ export async function processImplementationQueue(
     });
 
     try {
-      const run = await provider.startTask(task);
+      let planArtifact = task.planId
+        ? await store.findImplementationPlanArtifactBySpecId(task.specId)
+        : null;
+
+      if (!planArtifact || !task.sliceId) {
+        await emit(adapter, options, "implementation_plan_started", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+          taskId: task.taskId,
+          branch: task.targetBranch,
+          attempt: task.attempt
+        });
+        const planningRun = await provider.planTask(task);
+        await store.writeImplementationPlanningRun(planningRun);
+        await emitPlanningDiagnostics(adapter, options, task, planningRun);
+        planArtifact = await provider.collectPlanArtifact(planningRun.runId);
+
+        if (!planArtifact && (planningRun.status === "failed" || planningRun.result === "failed")) {
+          task.status = "failed";
+          task.failedReason = planningRun.summary ?? "planning failed";
+          task.updatedAt = new Date().toISOString();
+          await store.writeImplementationTask(task);
+          await emit(adapter, options, "implementation_plan_rejected", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+            taskId: task.taskId,
+            runId: planningRun.runId,
+            failedReason: task.failedReason
+          });
+          processed.push(task);
+          processedSpecs.add(task.specId);
+          continue;
+        }
+
+        if (!planArtifact) {
+          task.status = "failed";
+          task.failedReason = "Planning completed without a plan artifact";
+          task.updatedAt = new Date().toISOString();
+          await store.writeImplementationTask(task);
+          processed.push(task);
+          processedSpecs.add(task.specId);
+          continue;
+        }
+
+        const planValidation = validatePlanArtifact(task, planArtifact);
+        if (!planValidation.ok) {
+          task.status = planValidation.kind === "blocked" ? "blocked" : "failed";
+          task.blockedReason = planValidation.kind === "blocked" ? planValidation.reason : undefined;
+          task.failedReason = planValidation.kind === "failed" ? planValidation.reason : undefined;
+          task.updatedAt = new Date().toISOString();
+          await store.writeImplementationPlanArtifact(planArtifact);
+          await store.writeImplementationTask(task);
+          await emit(adapter, options, "implementation_plan_rejected", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+            taskId: task.taskId,
+            runId: planningRun.runId,
+            reason: planValidation.reason,
+            kind: planValidation.kind
+          });
+          processed.push(task);
+          processedSpecs.add(task.specId);
+          continue;
+        }
+
+        planArtifact.runId = planningRun.runId;
+        await store.writeImplementationPlanArtifact(planArtifact);
+        await writeImplementationPlanArtifacts(options.reportRootDir ?? process.cwd(), planArtifact);
+        const firstSlice = planArtifact.slices[0];
+        task.planId = planArtifact.planId;
+        task.sliceId = firstSlice.sliceId;
+        task.sliceIndex = 0;
+        task.totalSlices = planArtifact.slices.length;
+        task.allowedPaths = firstSlice.writeScope;
+        task.updatedAt = new Date().toISOString();
+        await store.writeImplementationTask(task);
+        await emit(adapter, options, planArtifact.blockedReason ? "implementation_plan_blocked" : "implementation_plan_completed", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+          taskId: task.taskId,
+          runId: planningRun.runId,
+          planId: planArtifact.planId,
+          sliceCount: planArtifact.slices.length,
+          blockedReason: planArtifact.blockedReason ?? "",
+          selectedContextFiles: planArtifact.selectedContextFiles
+        });
+
+        if (planArtifact.blockedReason) {
+          task.status = "blocked";
+          task.blockedReason = planArtifact.blockedReason;
+          await store.writeImplementationTask(task);
+          processed.push(task);
+          processedSpecs.add(task.specId);
+          continue;
+        }
+      }
+
+      const slice = planArtifact.slices.find((entry) => entry.sliceId === task.sliceId);
+      if (!slice) {
+        task.status = "failed";
+        task.failedReason = `Plan slice not found: ${task.sliceId ?? "unknown"}`;
+        task.updatedAt = new Date().toISOString();
+        await store.writeImplementationTask(task);
+        processed.push(task);
+        processedSpecs.add(task.specId);
+        continue;
+      }
+
+      await emit(adapter, options, "implementation_slice_started", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+        taskId: task.taskId,
+        planId: planArtifact.planId,
+        sliceId: slice.sliceId,
+        sliceIndex: task.sliceIndex ?? 0
+      });
+
+      const run = await provider.implementSlice(task, planArtifact, slice.sliceId);
       task.runId = run.runId;
       task.provider = run.provider;
       task.model = run.model;
@@ -162,27 +294,11 @@ export async function processImplementationQueue(
           model: run.model,
           traceId: run.traceId ?? "",
           attempt: task.attempt,
-          estimatedCostUsd: run.usage.estimatedCostUsd,
-          inputTokens: run.usage.inputTokens,
-          outputTokens: run.usage.outputTokens,
-          selectedContextFiles: run.discovery?.selectedContextFiles ?? [],
-          discoveryBudgetUsed: run.discovery?.budgetUsed,
-          blockedReason: task.blockedReason ?? ""
+          blockedReason: task.blockedReason ?? "",
+          failureStage: "slice_failed"
         });
-        if (run.discovery?.blockedReason) {
-          await emit(adapter, options, "implementation_context_discovery_blocked", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
-            taskId: task.taskId,
-            runId: run.runId,
-            provider: run.provider,
-            model: run.model,
-            traceId: run.traceId ?? "",
-            blockedCategory: run.discovery.blockedCategory ?? "",
-            blockedReason: run.discovery.blockedReason,
-            selectedContextFiles: run.discovery.selectedContextFiles,
-            discoveryBudgetUsed: run.discovery.budgetUsed
-          });
-        }
         processed.push(task);
+        processedSpecs.add(task.specId);
         continue;
       }
 
@@ -194,16 +310,11 @@ export async function processImplementationQueue(
         await emit(adapter, options, "implementation_task_failed", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
           taskId: task.taskId,
           runId: run.runId,
-          provider: run.provider,
-          model: run.model,
-          traceId: run.traceId ?? "",
-          attempt: task.attempt,
-          estimatedCostUsd: run.usage.estimatedCostUsd,
-          inputTokens: run.usage.inputTokens,
-          outputTokens: run.usage.outputTokens,
-          failedReason: task.failedReason ?? ""
+          failedReason: task.failedReason ?? "",
+          failureStage: "slice_failed"
         });
         processed.push(task);
+        processedSpecs.add(task.specId);
         continue;
       }
 
@@ -215,10 +326,7 @@ export async function processImplementationQueue(
         traceId: run.traceId ?? "",
         prNumber: artifact.prNumber,
         branch: artifact.branch,
-        filesChanged: artifact.filesChanged.length,
-        estimatedCostUsd: run.usage.estimatedCostUsd,
-        inputTokens: run.usage.inputTokens,
-        outputTokens: run.usage.outputTokens
+        filesChanged: artifact.filesChanged.length
       });
 
       const policyResult = validateArtifact(task, artifact);
@@ -226,23 +334,7 @@ export async function processImplementationQueue(
         task.status = "blocked";
         task.blockedReason = policyResult.reason;
         task.updatedAt = new Date().toISOString();
-        await store.writeImplementationRun({
-          ...run,
-          metadata: {
-            ...(run.metadata ?? {}),
-            orchestrationState: "blocked",
-            orchestrationReason: policyResult.reason
-          }
-        });
         await store.writeImplementationTask(task);
-        await emit(adapter, options, "implementation_task_blocked", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
-          taskId: task.taskId,
-          runId: run.runId,
-          prNumber: artifact.prNumber,
-          branch: artifact.branch,
-          blockedReason: policyResult.reason,
-          filesChanged: artifact.filesChanged.length
-        });
         processed.push(task);
         continue;
       }
@@ -251,155 +343,9 @@ export async function processImplementationQueue(
       task.prUrl = artifact.prUrl;
       task.branch = artifact.branch;
 
-      if (options.skipRemoteMergeGate || process.env.IMPLEMENTATION_TEST_MODE === "1" || !options.owner || !options.repo) {
-        const evidence = await adapter.generateScenarioEvidence?.(task.specId, {
-          actor: options.actor,
-          source: options.source,
-          deployId: options.deployId
-        }) ?? [];
-        artifact.evidenceRefs = evidence.map((entry) => entry.artifact ?? "").filter(Boolean);
-      } else {
-        let evidenceBlocked = false;
-        await withCheckedOutBranch(options.baseBranch, artifact.branch, async () => {
-          const checks = await runLocalChecks();
-          artifact.testSummary = {
-            passed: checks.passed ? 3 : 0,
-            failed: checks.passed ? 0 : 1,
-            command: checks.command
-        };
-
-        if (!checks.passed) {
-          throw new Error(checks.errorMessage ?? "Local checks failed");
-        }
-
-        const evidence = await adapter.generateScenarioEvidence?.(task.specId, {
-          actor: options.actor,
-          source: options.source,
-          deployId: options.deployId
-        }) ?? [];
-        artifact.evidenceRefs = evidence.map((entry) => entry.artifact ?? "").filter(Boolean);
-
-        const gitStatus = await execGit(process.cwd(), ["status", "--short"]);
-        if (gitStatus.stdout.trim()) {
-          await execGit(process.cwd(), ["config", "user.name", "github-actions[bot]"]);
-          await execGit(process.cwd(), ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
-          await execGit(process.cwd(), ["add", "."]);
-          await execGit(process.cwd(), ["commit", "-m", `test(factory): add evidence for ${task.specId}`]).catch(() => undefined);
-          await execGit(process.cwd(), ["push", "origin", artifact.branch]);
-          const currentSha = (await execGit(process.cwd(), ["rev-parse", "HEAD"])) .stdout.trim();
-          artifact.commitSha = currentSha;
-        }
-
-        const evidenceGate = await evaluateRequiredEvidence(adapter, task.specId, task.verificationTargets);
-        if (!evidenceGate.ok) {
-          task.status = "blocked";
-          task.blockedReason = `Required scenario evidence missing or failed: ${evidenceGate.missing.join(", ")}`;
-          task.updatedAt = new Date().toISOString();
-          await store.writeImplementationRun({
-            ...run,
-            metadata: {
-              ...(run.metadata ?? {}),
-              orchestrationState: "blocked",
-              orchestrationReason: task.blockedReason,
-              missingScenarioEvidence: evidenceGate.missing
-            }
-          });
-          await store.writeImplementationArtifact(artifact);
-          await store.writeImplementationTask(task);
-          await emit(adapter, options, "implementation_task_blocked", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
-            taskId: task.taskId,
-            runId: run.runId,
-            prNumber: artifact.prNumber,
-            branch: artifact.branch,
-            blockedReason: task.blockedReason,
-            filesChanged: artifact.filesChanged.length,
-            testsPassed: artifact.testSummary.passed,
-            testsFailed: artifact.testSummary.failed
-          });
-          evidenceBlocked = true;
-          return;
-        }
-
-        const pull = await buildGitHubApi().getPullRequest(options.owner, options.repo, artifact.prNumber);
-        if (pull.draft) {
-          await buildGitHubApi().markReadyForReview(options.owner, options.repo, artifact.prNumber);
-        }
-
-        await buildGitHubApi().dispatchWorkflow(options.owner, options.repo, "ci.yml", artifact.branch);
-        await waitForRemoteChecks(options.owner, options.repo, artifact.commitSha, task.limits.maxDurationMs);
-        const refreshed = await buildGitHubApi().getPullRequest(options.owner, options.repo, artifact.prNumber);
-        if (refreshed.mergeable === false || !["clean", "has_hooks", "unstable", "unknown"].includes(refreshed.mergeableState)) {
-          throw new Error(`Branch protection/mergeability not satisfied: ${refreshed.mergeableState}`);
-        }
-
-        if (task.policy.allowAutoMerge) {
-          await buildGitHubApi().mergePullRequest(options.owner, options.repo, artifact.prNumber, `Implement ${task.specId}`);
-        }
-        });
-
-        if (evidenceBlocked) {
-          processed.push(task);
-          continue;
-        }
-
-        await withCheckedOutBranch(artifact.branch, options.baseBranch, async () => {
-          await execGit(process.cwd(), ["pull", "--ff-only", "origin", options.baseBranch]);
-        });
-      }
-
-      const evidenceGate = await evaluateRequiredEvidence(adapter, task.specId, task.verificationTargets);
-      if (!evidenceGate.ok) {
-        task.status = "blocked";
-        task.blockedReason = `Required scenario evidence missing or failed: ${evidenceGate.missing.join(", ")}`;
-        task.updatedAt = new Date().toISOString();
-        await store.writeImplementationRun({
-          ...run,
-          metadata: {
-            ...(run.metadata ?? {}),
-            orchestrationState: "blocked",
-            orchestrationReason: task.blockedReason,
-            missingScenarioEvidence: evidenceGate.missing
-          }
-        });
-        await store.writeImplementationArtifact(artifact);
-        await store.writeImplementationTask(task);
-        await emit(adapter, options, "implementation_task_blocked", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
-          taskId: task.taskId,
-          runId: run.runId,
-          prNumber: artifact.prNumber,
-          branch: artifact.branch,
-          blockedReason: task.blockedReason,
-          filesChanged: artifact.filesChanged.length,
-          testsPassed: artifact.testSummary.passed,
-          testsFailed: artifact.testSummary.failed
-        });
-        processed.push(task);
-        continue;
-      }
-
-      await runPipelineStep(adapter, { step: "implement", specId: task.specId, actor: options.actor, source: options.source, deployId: options.deployId });
-      await runPipelineStep(adapter, { step: "verify", specId: task.specId, actor: options.actor, source: options.source, deployId: options.deployId });
-
-      task.status = "merged";
-      task.updatedAt = new Date().toISOString();
-      await store.writeImplementationArtifact(artifact);
-      await store.writeImplementationTask(task);
-      await emit(adapter, options, "implementation_task_merged", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
-        taskId: task.taskId,
-        runId: run.runId,
-        provider: run.provider,
-        model: run.model,
-        traceId: run.traceId ?? "",
-        prNumber: artifact.prNumber,
-        branch: artifact.branch,
-        filesChanged: artifact.filesChanged.length,
-        testsPassed: artifact.testSummary.passed,
-        testsFailed: artifact.testSummary.failed,
-        estimatedCostUsd: run.usage.estimatedCostUsd,
-        inputTokens: run.usage.inputTokens,
-        outputTokens: run.usage.outputTokens
-      });
+      await completeImplementationMerge(adapter, store, options, task, run, artifact, slice, planArtifact);
       processed.push(task);
+      processedSpecs.add(task.specId);
     } catch (error) {
       task.status = "failed";
       task.failedReason = error instanceof Error ? error.message : String(error);
@@ -427,6 +373,7 @@ export async function processImplementationQueue(
         attempt: task.attempt
       });
       processed.push(task);
+      processedSpecs.add(task.specId);
     }
   }
 
@@ -597,6 +544,43 @@ async function emitProviderDiagnostics(
   );
 }
 
+async function emitPlanningDiagnostics(
+  adapter: FactoryAdapter,
+  options: SpecExecutionOptions,
+  task: ImplementationTask,
+  run: ImplementationPlanningRun
+): Promise<void> {
+  const requestDiagnostics = run.metadata?.requestDiagnostics as { attempts?: Array<Record<string, unknown>> } | undefined;
+  if (!requestDiagnostics?.attempts?.length) {
+    return;
+  }
+  for (const attempt of requestDiagnostics.attempts.slice(0, -1)) {
+    await emit(adapter, options, "provider_request_retry", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+      taskId: task.taskId,
+      runId: run.runId,
+      provider: run.provider,
+      model: run.model,
+      stage: "plan",
+      attempt
+    });
+  }
+  await emit(
+    adapter,
+    options,
+    run.status === "failed" ? "provider_request_failed" : "provider_request_succeeded",
+    task.specId,
+    task.verificationTargets[0] ?? "SCN-UNBOUND",
+    {
+      taskId: task.taskId,
+      runId: run.runId,
+      provider: run.provider,
+      model: run.model,
+      stage: "plan",
+      diagnostics: requestDiagnostics
+    }
+  );
+}
+
 function validateArtifact(task: ImplementationTask, artifact: ImplementationArtifact): { ok: true } | { ok: false; reason: string } {
   if (artifact.filesChanged.length > task.limits.maxFilesChanged) {
     return { ok: false, reason: `Changed file count ${artifact.filesChanged.length} exceeds cap ${task.limits.maxFilesChanged}` };
@@ -614,6 +598,108 @@ function validateArtifact(task: ImplementationTask, artifact: ImplementationArti
   return { ok: true };
 }
 
+function validatePlanArtifact(
+  task: ImplementationTask,
+  planArtifact: ImplementationPlanArtifact
+): { ok: true } | { ok: false; kind: "blocked" | "failed"; reason: string } {
+  if (planArtifact.blockedReason?.trim()) {
+    return { ok: false, kind: "blocked", reason: planArtifact.blockedReason.trim() };
+  }
+  if (!Array.isArray(planArtifact.slices) || planArtifact.slices.length === 0) {
+    return { ok: false, kind: "failed", reason: "Implementation plan must contain at least one slice" };
+  }
+  if (planArtifact.slices.length > 4) {
+    return { ok: false, kind: "failed", reason: "Implementation plan exceeds v1 slice cap (4)" };
+  }
+
+  const covered = new Set<string>();
+  for (const [index, slice] of planArtifact.slices.entries()) {
+    if (!slice.sliceId || !slice.title || !slice.goal) {
+      return { ok: false, kind: "failed", reason: `Implementation slice ${index + 1} is missing required fields` };
+    }
+    if (index === 0 && slice.targetFiles.length > 8) {
+      return { ok: false, kind: "failed", reason: "First implementation slice is too broad (>8 target files)" };
+    }
+    for (const targetFile of slice.targetFiles) {
+      if (matchesAny(targetFile, task.policy.blockedPaths)) {
+        return { ok: false, kind: "failed", reason: `Plan slice targets blocked path: ${targetFile}` };
+      }
+      if (!matchesAny(targetFile, task.allowedPaths)) {
+        return { ok: false, kind: "failed", reason: `Plan slice targets path outside implementation allowlist: ${targetFile}` };
+      }
+    }
+    for (const writePath of slice.writeScope) {
+      if (matchesAny(writePath, task.policy.blockedPaths)) {
+        return { ok: false, kind: "failed", reason: `Plan slice write scope touches blocked path: ${writePath}` };
+      }
+      if (!matchesAny(writePath, task.allowedPaths)) {
+        return { ok: false, kind: "failed", reason: `Plan slice write scope exceeds allowlist: ${writePath}` };
+      }
+    }
+    for (const scenarioId of slice.expectedEvidence) {
+      covered.add(scenarioId);
+    }
+  }
+
+  const missingScenarios = task.verificationTargets.filter((scenarioId) => !covered.has(scenarioId));
+  if (missingScenarios.length > 0) {
+    return {
+      ok: false,
+      kind: "failed",
+      reason: `Implementation plan does not cover required scenarios: ${missingScenarios.join(", ")}`
+    };
+  }
+
+  return { ok: true };
+}
+
+function getNextSlice(
+  planArtifact: ImplementationPlanArtifact | null,
+  existingTask: ImplementationTask | null
+): (ImplementationPlanSlice & { sliceIndex: number }) | undefined {
+  if (!planArtifact) {
+    return undefined;
+  }
+  if (!existingTask?.planId || existingTask.planId !== planArtifact.planId) {
+    const first = planArtifact.slices[0];
+    return first ? { ...first, sliceIndex: 0 } : undefined;
+  }
+  const nextIndex = existingTask.status === "merged"
+    ? (existingTask.sliceIndex ?? -1) + 1
+    : (existingTask.sliceIndex ?? 0);
+  const next = planArtifact.slices[nextIndex];
+  return next ? { ...next, sliceIndex: nextIndex } : undefined;
+}
+
+async function writeImplementationPlanArtifacts(rootDir: string, planArtifact: ImplementationPlanArtifact): Promise<void> {
+  const planPath = join(rootDir, "implementation-plans", planArtifact.specId, "plan.json");
+  const summaryPath = join(rootDir, "reports", "implementation-plan", `${planArtifact.specId}.md`);
+  await mkdir(dirname(planPath), { recursive: true });
+  await mkdir(dirname(summaryPath), { recursive: true });
+  await writeFile(planPath, `${JSON.stringify(planArtifact, null, 2)}\n`, "utf8");
+  const summaryLines = [
+    `# Implementation Plan ${planArtifact.specId}`,
+    "",
+    planArtifact.summary,
+    "",
+    "## Slices",
+    ...planArtifact.slices.flatMap((slice, index) => [
+      `### ${index + 1}. ${slice.title}`,
+      `Goal: ${slice.goal}`,
+      `Target files: ${slice.targetFiles.join(", ") || "(none)"}`,
+      `Expected tests: ${slice.expectedTests.join(", ") || "(none)"}`,
+      `Expected evidence: ${slice.expectedEvidence.join(", ") || "(none)"}`,
+      `Write scope: ${slice.writeScope.join(", ") || "(none)"}`,
+      `Depends on: ${slice.dependsOnSliceIds.join(", ") || "(none)"}`,
+      ""
+    ]),
+    "## Risks",
+    ...(planArtifact.risks.length > 0 ? planArtifact.risks.map((risk) => `- ${risk}`) : ["- None recorded"]),
+    ""
+  ];
+  await writeFile(summaryPath, summaryLines.join("\n"), "utf8");
+}
+
 async function evaluateRequiredEvidence(
   adapter: FactoryAdapter,
   specId: string,
@@ -628,6 +714,160 @@ async function evaluateRequiredEvidence(
   }
 
   return missing.length > 0 ? { ok: false, missing } : { ok: true };
+}
+
+async function completeImplementationMerge(
+  adapter: FactoryAdapter,
+  store: FactoryStorePort,
+  options: SpecExecutionOptions,
+  task: ImplementationTask,
+  run: ImplementationRun,
+  artifact: ImplementationArtifact,
+  slice: ImplementationPlanSlice,
+  planArtifact: ImplementationPlanArtifact
+): Promise<void> {
+  const localChecks = await runLocalChecks();
+  artifact.testSummary = {
+    passed: localChecks.passed ? 1 : 0,
+    failed: localChecks.passed ? 0 : 1,
+    command: localChecks.command
+  };
+  await store.writeImplementationArtifact(artifact);
+
+  if (!localChecks.passed) {
+    task.status = "blocked";
+    task.blockedReason = localChecks.errorMessage ?? "Local checks failed";
+    task.updatedAt = new Date().toISOString();
+    await store.writeImplementationTask(task);
+    await emit(adapter, options, "implementation_task_blocked", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+      taskId: task.taskId,
+      runId: run.runId,
+      blockedReason: task.blockedReason,
+      failureStage: "slice_failed"
+    });
+    return;
+  }
+
+  if (!options.skipRemoteMergeGate && !process.env.IMPLEMENTATION_TEST_MODE && options.owner && options.repo) {
+    const github = buildGitHubApi();
+    const pull = await github.getPullRequest(options.owner, options.repo, artifact.prNumber);
+    if (pull.draft) {
+      await github.markReadyForReview(options.owner, options.repo, artifact.prNumber);
+    }
+    await github.dispatchWorkflow(options.owner, options.repo, "ci.yml", artifact.branch);
+    await waitForRemoteChecks(options.owner, options.repo, artifact.commitSha, task.limits.maxDurationMs);
+    const refreshed = await github.getPullRequest(options.owner, options.repo, artifact.prNumber);
+    if (refreshed.mergeable === false || !["clean", "has_hooks", "unstable", "unknown"].includes(refreshed.mergeableState)) {
+      throw new Error(`Implementation branch not mergeable: ${refreshed.mergeableState}`);
+    }
+    if (task.policy.allowAutoMerge) {
+      await github.mergePullRequest(options.owner, options.repo, artifact.prNumber, `Implement ${task.specId} (${slice.sliceId})`);
+    }
+    await execGit(process.cwd(), ["pull", "--ff-only", "origin", options.baseBranch]);
+  }
+
+  await emit(adapter, options, "implementation_iteration_completed", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+    taskId: task.taskId,
+    runId: run.runId,
+    planId: planArtifact.planId,
+    sliceId: slice.sliceId,
+    prNumber: artifact.prNumber
+  });
+  await emit(adapter, options, "implementation_slice_completed", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+    taskId: task.taskId,
+    runId: run.runId,
+    planId: planArtifact.planId,
+    sliceId: slice.sliceId,
+    sliceIndex: task.sliceIndex ?? 0
+  });
+
+  const isFinalSlice = (task.sliceIndex ?? 0) >= planArtifact.slices.length - 1;
+  if (!isFinalSlice) {
+    const nextSlice = planArtifact.slices[(task.sliceIndex ?? 0) + 1];
+    if (!nextSlice) {
+      throw new Error(`Missing next slice for ${task.specId}`);
+    }
+    task.status = "merged";
+    task.updatedAt = new Date().toISOString();
+    await store.writeImplementationTask(task);
+    await store.enqueueImplementationTask({
+      specId: task.specId,
+      source: task.source,
+      owner: task.owner,
+      repo: task.repo,
+      baseBranch: task.baseBranch,
+      baseSha: task.baseSha,
+      targetBranch: task.targetBranch,
+      allowedPaths: nextSlice.writeScope,
+      verificationTargets: task.verificationTargets,
+      contextBundleRef: task.contextBundleRef,
+      priority: task.priority,
+      limits: task.limits,
+      policy: task.policy,
+      planId: planArtifact.planId,
+      sliceId: nextSlice.sliceId,
+      sliceIndex: (task.sliceIndex ?? 0) + 1,
+      totalSlices: planArtifact.slices.length
+    });
+    await emit(adapter, options, "implementation_task_merged", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+      taskId: task.taskId,
+      runId: run.runId,
+      planId: planArtifact.planId,
+      sliceId: slice.sliceId,
+      prNumber: artifact.prNumber,
+      nextSliceId: nextSlice.sliceId
+    });
+    return;
+  }
+
+  if (adapter.generateScenarioEvidence) {
+    await adapter.generateScenarioEvidence(task.specId, {
+      actor: options.actor,
+      source: options.source,
+      deployId: options.deployId
+    });
+  }
+
+  const evidenceGate = await evaluateRequiredEvidence(adapter, task.specId, task.verificationTargets);
+  if (!evidenceGate.ok) {
+    task.status = "blocked";
+    task.blockedReason = `Required scenario evidence missing or failed: ${evidenceGate.missing.join(", ")}`;
+    task.updatedAt = new Date().toISOString();
+    await store.writeImplementationTask(task);
+    await emit(adapter, options, "implementation_task_blocked", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+      taskId: task.taskId,
+      runId: run.runId,
+      prNumber: artifact.prNumber,
+      blockedReason: task.blockedReason
+    });
+    return;
+  }
+
+  await runPipelineStep(adapter, {
+    step: "implement",
+    specId: task.specId,
+    actor: options.actor,
+    source: options.source,
+    deployId: options.deployId
+  });
+  await runPipelineStep(adapter, {
+    step: "verify",
+    specId: task.specId,
+    actor: options.actor,
+    source: options.source,
+    deployId: options.deployId
+  });
+
+  task.status = "merged";
+  task.updatedAt = new Date().toISOString();
+  await store.writeImplementationTask(task);
+  await emit(adapter, options, "implementation_task_merged", task.specId, task.verificationTargets[0] ?? "SCN-UNBOUND", {
+    taskId: task.taskId,
+    runId: run.runId,
+    planId: planArtifact.planId,
+    sliceId: slice.sliceId,
+    prNumber: artifact.prNumber
+  });
 }
 
 async function runLocalChecks(): Promise<{ passed: boolean; command: string; errorMessage?: string }> {

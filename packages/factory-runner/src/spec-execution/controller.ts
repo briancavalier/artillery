@@ -57,20 +57,34 @@ export async function runSpecExecution(options: RunSpecExecutionOptions): Promis
   const advanced = [];
   for (const task of processed) {
     const spec = await adapter.readSpecById(task.specId);
+    const planArtifact = await store.findImplementationPlanArtifactBySpecId(task.specId);
+    const planningRun = planArtifact?.runId ? await store.getImplementationPlanningRun(planArtifact.runId) : null;
     const run = task.runId ? await store.getImplementationRun(task.runId) : null;
     const artifact = task.runId ? await store.getImplementationArtifact(task.runId) : null;
     const evidence = spec ? await Promise.all(spec.data.scenarios.filter((scenario) => scenario.required).map((scenario) => adapter.readScenarioEvidence(task.specId, scenario.id))) : [];
+    const failureStage = planningRun?.status === "failed"
+      ? "plan_failed"
+      : planningRun?.result === "blocked" || task.blockedReason === planArtifact?.blockedReason
+        ? "plan_blocked"
+        : task.status === "failed" || task.status === "blocked"
+          ? "slice_failed"
+          : undefined;
     const entry = {
       specId: task.specId,
       previousStatus: previousStatusBySpec.get(task.specId) ?? "Architected",
       finalStatus: spec?.data.status ?? "Architected",
       taskStatus: task.status,
+      planId: task.planId ?? planArtifact?.planId,
+      sliceId: task.sliceId,
+      sliceIndex: task.sliceIndex,
+      totalSlices: task.totalSlices ?? planArtifact?.slices.length,
       runId: task.runId,
       runStatus: run?.status,
       runResult: run?.result,
       provider: run?.provider ?? task.provider,
       model: run?.model ?? task.model,
       traceId: run?.traceId,
+      failureStage,
       evidenceGenerated: evidence.filter(Boolean).length,
       passedEvidence: evidence.filter((entry) => entry?.passed).length,
       testsPassed: artifact?.testSummary.passed,
@@ -78,6 +92,16 @@ export async function runSpecExecution(options: RunSpecExecutionOptions): Promis
       blockedReason: task.blockedReason,
       failureReason: task.failedReason,
       runSummary: run?.summary,
+      planningRunId: planningRun?.runId,
+      planningRunStatus: planningRun?.status,
+      planningRunResult: planningRun?.result,
+      planningSummary: planningRun?.summary,
+      planningFilesSelected: planningRun?.discovery?.selectedContextFiles ?? planArtifact?.selectedContextFiles,
+      planSlices: planArtifact?.slices.map((slice) => ({
+        sliceId: slice.sliceId,
+        title: slice.title,
+        targetFiles: slice.targetFiles
+      })),
       discoveryFilesRead: run?.discovery?.readFiles,
       discoveryFilesSelected: run?.discovery?.selectedContextFiles ?? artifact?.discovery?.selectedContextFiles,
       discoveryBlockedReason: run?.discovery?.blockedReason,

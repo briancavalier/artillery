@@ -5,6 +5,8 @@ import type {
   ArchitectureTaskRequest,
   CloudEventEnvelope,
   FeatureSpec,
+  ImplementationPlanArtifact,
+  ImplementationPlanningRun,
   ImplementationArtifact,
   ImplementationRun,
   ImplementationTask,
@@ -38,6 +40,13 @@ export interface ImplementationScope {
   maxFilesChanged?: number;
 }
 
+export interface ArchitectureScope {
+  artifactRoot: string;
+  allowedPaths: string[];
+  blockedPaths: string[];
+  maxFilesRead?: number;
+}
+
 export interface ImplementationDiscoveryBudget {
   maxFiles: number;
   maxBytes: number;
@@ -58,17 +67,13 @@ export interface ImplementationContext {
   maxFilesChanged?: number;
 }
 
-export interface ArchitectureScope {
-  artifactRoot: string;
-  blockedPaths: string[];
-}
-
 export interface ArchitectureContext {
   specId: string;
   relevantFiles: string[];
   readPaths: string[];
   seedFiles: string[];
   discoveryGoals: string[];
+  discoveryBudget: ImplementationDiscoveryBudget;
   reviewNotes: string[];
   artifactRoot: string;
   blockedPaths: string[];
@@ -101,13 +106,23 @@ export interface FactoryAdapter {
   readEvaluation(specId: string): Promise<EvaluationReport | null>;
   readScenarioEvidence(specId: string, scenarioId: string): Promise<ScenarioEvidence | null>;
   generateScenarioEvidence?(specId: string, options?: EvidenceGenerationOptions): Promise<ScenarioEvidence[]>;
-  buildImplementationContext?(specId: string): Promise<ImplementationContext>;
-  getImplementationScope?(specId: string): Promise<ImplementationScope>;
   buildArchitectureContext?(specId: string): Promise<ArchitectureContext>;
   getArchitectureScope?(specId: string): Promise<ArchitectureScope>;
+  buildImplementationContext?(specId: string): Promise<ImplementationContext>;
+  getImplementationScope?(specId: string): Promise<ImplementationScope>;
   readCanarySnapshot(): Promise<CanarySnapshot | null>;
   deploy(environment: "staging" | "production", specId: string): Promise<DeploymentRecord>;
   rollback(specId: string, reason: string): Promise<void>;
+}
+
+export interface ImplementationProvider {
+  planTask(task: ImplementationTask): Promise<ImplementationPlanningRun>;
+  getPlanningRun(runId: string): Promise<ImplementationPlanningRun | null>;
+  collectPlanArtifact(runId: string): Promise<ImplementationPlanArtifact | null>;
+  implementSlice(task: ImplementationTask, plan: ImplementationPlanArtifact, sliceId: string): Promise<ImplementationRun>;
+  getRun(runId: string): Promise<ImplementationRun | null>;
+  cancelRun(runId: string): Promise<void>;
+  collectArtifacts(runId: string): Promise<ImplementationArtifact | null>;
 }
 
 export interface ArchitectureProvider {
@@ -115,13 +130,6 @@ export interface ArchitectureProvider {
   getRun(runId: string): Promise<ArchitectureRun | null>;
   cancelRun(runId: string): Promise<void>;
   collectArtifacts(runId: string): Promise<ArchitectureArtifact | null>;
-}
-
-export interface ImplementationProvider {
-  startTask(task: ImplementationTask): Promise<ImplementationRun>;
-  getRun(runId: string): Promise<ImplementationRun | null>;
-  cancelRun(runId: string): Promise<void>;
-  collectArtifacts(runId: string): Promise<ImplementationArtifact | null>;
 }
 
 export interface FactoryStorePort {
@@ -141,6 +149,11 @@ export interface FactoryStorePort {
   findImplementationTaskBySpecId(specId: string): Promise<ImplementationTask | null>;
   leaseImplementationTask(): Promise<ImplementationTask | null>;
   writeImplementationTask(task: ImplementationTask): Promise<void>;
+  writeImplementationPlanningRun(run: ImplementationPlanningRun): Promise<void>;
+  getImplementationPlanningRun(runId: string): Promise<ImplementationPlanningRun | null>;
+  writeImplementationPlanArtifact(artifact: ImplementationPlanArtifact): Promise<void>;
+  getImplementationPlanArtifact(runId: string): Promise<ImplementationPlanArtifact | null>;
+  findImplementationPlanArtifactBySpecId(specId: string): Promise<ImplementationPlanArtifact | null>;
   writeImplementationRun(run: ImplementationRun): Promise<void>;
   getImplementationRun(runId: string): Promise<ImplementationRun | null>;
   writeImplementationArtifact(artifact: ImplementationArtifact): Promise<void>;
@@ -163,8 +176,8 @@ export type PipelineStep =
   | "evaluate"
   | "refine"
   | "accept"
-  | "veto"
   | "architect"
+  | "veto"
   | "implement"
   | "verify"
   | "deploy"

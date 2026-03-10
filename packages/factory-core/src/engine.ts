@@ -36,6 +36,9 @@ export async function runPipelineStep(adapter: FactoryAdapter, options: RunOptio
     case "accept":
       await accept(adapter, options);
       return;
+    case "architect":
+      await architect(adapter, options);
+      return;
     case "veto":
       await veto(adapter, options);
       return;

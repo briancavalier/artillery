@@ -13,12 +13,17 @@ export interface ExecutionAdvanceItem {
   previousStatus: SpecStatus;
   finalStatus: SpecStatus;
   taskStatus: string;
+  planId?: string;
+  sliceId?: string;
+  sliceIndex?: number;
+  totalSlices?: number;
   runId?: string;
   runStatus?: string;
   runResult?: string;
   provider?: string;
   model?: string;
   traceId?: string;
+  failureStage?: string;
   evidenceGenerated: number;
   passedEvidence: number;
   testsPassed?: number;
@@ -26,6 +31,16 @@ export interface ExecutionAdvanceItem {
   blockedReason?: string;
   failureReason?: string;
   runSummary?: string;
+  planningRunId?: string;
+  planningRunStatus?: string;
+  planningRunResult?: string;
+  planningSummary?: string;
+  planningFilesSelected?: string[];
+  planSlices?: Array<{
+    sliceId: string;
+    title: string;
+    targetFiles: string[];
+  }>;
   discoveryFilesRead?: string[];
   discoveryFilesSelected?: string[];
   discoveryBlockedReason?: string;

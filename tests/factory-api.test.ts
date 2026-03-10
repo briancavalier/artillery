@@ -172,8 +172,8 @@ test("factory store ingests CloudEvents and reports centralized admin status", a
       artifactRoot: "architecture/SPEC-API-1",
       contextBundleRef: "reports/architecture-context/SPEC-API-1.md",
       priority: 100,
-      limits: { maxDurationMs: 1000, maxCostUsd: 1 },
-      policy: { allowAutoMerge: true, blockedPaths: ["apps/artillery-game/**"] }
+      limits: { maxDurationMs: 1000, maxCostUsd: 1, maxFilesRead: 16 },
+      policy: { allowAutoMerge: true, allowNetwork: false, blockedPaths: ["apps/artillery-game/**"] }
     });
     assert.equal(architectureTask.status, "queued");
     const leasedArchitecture = await store.leaseArchitectureTask();
@@ -188,7 +188,8 @@ test("factory store ingests CloudEvents and reports centralized admin status", a
       startedAt: new Date().toISOString(),
       finishedAt: new Date().toISOString(),
       result: "pr_opened",
-      usage: { inputTokens: 1, outputTokens: 2, estimatedCostUsd: 0.01 }
+      usage: { inputTokens: 1, outputTokens: 2, estimatedCostUsd: 0.01 },
+      selectedFiles: ["apps/artillery-game/src/shared/simulation.ts"]
     });
     await store.writeArchitectureArtifact({
       runId: "arch-run-1",
@@ -197,14 +198,16 @@ test("factory store ingests CloudEvents and reports centralized admin status", a
       prUrl: "https://example.test/pr/8",
       branch: "codex/architect-spec-api-1",
       commitSha: "c0ffee",
+      artifactRoot: "architecture/SPEC-API-1",
       filesChanged: ["architecture/SPEC-API-1/README.md"],
       summaryMd: "summary",
       payload: {
-        readme: "Architecture summary",
+        readmeMd: "Architecture summary",
         integrationPoints: [{ path: "apps/artillery-game/src/shared/simulation.ts", role: "simulation", writeIntent: "edit", priority: 1 }],
-        invariants: ["Keep deterministic state hashing stable."],
-        scenarioTrace: [{ scenarioId: "SCN-API-1", filePaths: ["apps/artillery-game/src/shared/simulation.ts"], evidenceHooks: ["integration"] }]
-      }
+        invariants: [{ id: "INV-1", description: "Keep deterministic state hashing stable.", category: "determinism" }],
+        scenarioTrace: [{ scenarioId: "SCN-API-1", paths: ["apps/artillery-game/src/shared/simulation.ts"], evidenceHooks: ["integration"] }]
+      },
+      selectedFiles: ["apps/artillery-game/src/shared/simulation.ts"]
     });
     const storedArchitectureRun = await store.getArchitectureRun("arch-run-1");
     const storedArchitectureArtifact = await store.getArchitectureArtifact("arch-run-1");

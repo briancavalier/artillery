@@ -243,7 +243,7 @@ test("selectContextFiles records selected files and reasons within budget", asyn
       score: 75,
       reasons: ["path matches keywords: determin"]
     }
-  ], { maxFiles: 2, maxBytes: 10_000 });
+  ], { maxFiles: 2, maxBytes: 10_000 }, [], Number.MAX_SAFE_INTEGER);
 
   assert.deepEqual(selection.selectedFiles, [
     "apps/artillery-game/src/shared/simulation.ts",

@@ -157,20 +157,20 @@ export function createArtilleryAdapter(overrides?: Partial<AdapterConfig>): Fact
       });
     },
 
-    buildImplementationContext: async (specId: string): Promise<ImplementationContext> => (
-      buildArtilleryImplementationContext(config.specDir, specId)
-    ),
-
-    getImplementationScope: async (specId: string): Promise<ImplementationScope> => (
-      getArtilleryImplementationScope(specId)
-    ),
-
     buildArchitectureContext: async (specId: string): Promise<ArchitectureContext> => (
       buildArtilleryArchitectureContext(config.specDir, specId)
     ),
 
     getArchitectureScope: async (specId: string): Promise<ArchitectureScope> => (
       getArtilleryArchitectureScope(specId)
+    ),
+
+    buildImplementationContext: async (specId: string): Promise<ImplementationContext> => (
+      buildArtilleryImplementationContext(config.specDir, specId)
+    ),
+
+    getImplementationScope: async (specId: string): Promise<ImplementationScope> => (
+      getArtilleryImplementationScope(specId)
     ),
 
     readCanarySnapshot: async () => {

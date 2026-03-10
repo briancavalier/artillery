@@ -6,6 +6,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type {
   FeatureSpec,
+  ImplementationPlanArtifact,
+  ImplementationPlanSlice,
+  ImplementationPlanningRun,
   ImplementationArtifact,
   ImplementationDiscoveryBudget,
   ImplementationDiscoveryTrace,
@@ -28,7 +31,9 @@ interface CodexProviderOptions {
 }
 
 interface StoredRun {
-  run: ImplementationRun;
+  planRun?: ImplementationPlanningRun;
+  run?: ImplementationRun;
+  planArtifact: ImplementationPlanArtifact | null;
   artifact: ImplementationArtifact | null;
 }
 
@@ -37,6 +42,18 @@ interface ParsedCodexResponse {
   rawText: string;
   summary: string;
   patch: string;
+  diagnostics: OpenAiRequestDiagnostics;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
+  };
+}
+
+interface ParsedPlanResponse {
+  responseId?: string;
+  rawText: string;
+  plan: ImplementationPlanArtifact;
   diagnostics: OpenAiRequestDiagnostics;
   usage: {
     inputTokens: number;
@@ -100,25 +117,24 @@ export class CodexImplementationProvider implements ImplementationProvider {
 
   constructor(private readonly options: CodexProviderOptions) {}
 
-  async startTask(task: ImplementationTask): Promise<ImplementationRun> {
+  async planTask(task: ImplementationTask): Promise<ImplementationPlanningRun> {
     const runId = randomUUID();
-    const startedAt = new Date().toISOString();
     const branch = task.targetBranch;
-    const worktreePath = join(tmpdir(), `darkfactory-codex-${task.specId.toLowerCase()}-${Date.now()}`);
-    let run: ImplementationRun = {
+    const worktreePath = join(tmpdir(), `darkfactory-plan-${task.specId.toLowerCase()}-${Date.now()}`);
+    let run: ImplementationPlanningRun = {
       runId,
       taskId: task.taskId,
       provider: "openai-codex",
       model: process.env.OPENAI_MODEL ?? "gpt-5-codex",
       status: "running",
-      startedAt,
+      startedAt: new Date().toISOString(),
       usage: {
         inputTokens: 0,
         outputTokens: 0,
         estimatedCostUsd: 0
       }
     };
-    this.runs.set(runId, { run, artifact: null });
+    this.runs.set(runId, { planRun: run, run: undefined, planArtifact: null, artifact: null });
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -130,33 +146,22 @@ export class CodexImplementationProvider implements ImplementationProvider {
         summary: "OPENAI_API_KEY is not configured",
         metadata: {
           branch,
-          phase: "provider_init",
+          phase: "planning",
           reason: "missing_openai_api_key"
         }
       };
-      this.runs.set(runId, { run, artifact: null });
+      this.runs.set(runId, { planRun: run, run: undefined, planArtifact: null, artifact: null });
       return run;
     }
 
     try {
-      await this.options.github.createOrResetBranch(this.options.owner, this.options.repo, branch, task.baseSha);
       await execGit(this.options.repoRoot, ["worktree", "add", "-B", branch, worktreePath, task.baseSha]);
       await execGit(worktreePath, ["checkout", branch]);
 
       const contextText = await readContext(task.contextBundleRef);
       const discovery = await discoverImplementationContext(worktreePath, task, contextText);
-      const discoveryMetadata = {
-        discovery: discovery.trace
-      };
-      run = {
-        ...run,
-        discovery: discovery.trace,
-        metadata: {
-          ...(run.metadata ?? {}),
-          ...discoveryMetadata
-        }
-      };
-      this.runs.set(runId, { run, artifact: null });
+      run = { ...run, discovery: discovery.trace };
+      this.runs.set(runId, { planRun: run, run: undefined, planArtifact: null, artifact: null });
 
       if (discovery.trace.blockedReason && discovery.trace.selectedContextFiles.length === 0) {
         run = {
@@ -168,11 +173,138 @@ export class CodexImplementationProvider implements ImplementationProvider {
           metadata: {
             ...(run.metadata ?? {}),
             branch,
-            phase: "context_discovery",
+            phase: "planning_discovery",
             reason: discovery.trace.blockedCategory ?? "discovery_blocked"
           }
         };
-        this.runs.set(runId, { run, artifact: null });
+        this.runs.set(runId, { planRun: run, run: undefined, planArtifact: null, artifact: null });
+        return run;
+      }
+
+      const parsed = await requestPlanResponse(apiKey, task, branch, contextText, discovery.promptContext);
+      const plan = normalizePlanArtifact(parsed.plan, task, discovery.trace);
+      run = {
+        ...run,
+        status: plan.blockedReason ? "blocked" : "completed",
+        finishedAt: new Date().toISOString(),
+        result: plan.blockedReason ? "blocked" : "planned",
+        traceId: parsed.responseId,
+        summary: plan.blockedReason ?? plan.summary,
+        usage: parsed.usage,
+        discovery: discovery.trace,
+        metadata: {
+          ...(run.metadata ?? {}),
+          branch,
+          phase: "planning",
+          requestDiagnostics: parsed.diagnostics
+        }
+      };
+      this.runs.set(runId, { planRun: run, run: undefined, planArtifact: plan, artifact: null });
+      return run;
+    } catch (error) {
+      run = {
+        ...run,
+        status: error instanceof OpenAiRequestError ? "failed" : "blocked",
+        finishedAt: new Date().toISOString(),
+        result: error instanceof OpenAiRequestError ? "failed" : "blocked",
+        summary: error instanceof Error ? error.message : String(error),
+        metadata: {
+          ...(run.metadata ?? {}),
+          branch,
+          phase: "planning",
+          failureClass: error instanceof OpenAiRequestError ? error.failureClass : undefined,
+          requestDiagnostics: error instanceof OpenAiRequestError ? error.diagnostics : undefined,
+          statusCode: error instanceof OpenAiRequestError ? error.statusCode : undefined,
+          timedOut: error instanceof OpenAiRequestError ? error.timedOut : undefined
+        }
+      };
+      this.runs.set(runId, { planRun: run, run: undefined, planArtifact: null, artifact: null });
+      return run;
+    } finally {
+      await execGit(this.options.repoRoot, ["checkout", task.baseBranch]).catch(() => undefined);
+      await execGit(this.options.repoRoot, ["worktree", "remove", "--force", worktreePath]).catch(() => undefined);
+      await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  async implementSlice(task: ImplementationTask, plan: ImplementationPlanArtifact, sliceId: string): Promise<ImplementationRun> {
+    const slice = plan.slices.find((entry) => entry.sliceId === sliceId);
+    if (!slice) {
+      return {
+        runId: randomUUID(),
+        taskId: task.taskId,
+        provider: "openai-codex",
+        model: process.env.OPENAI_MODEL ?? "gpt-5-codex",
+        status: "failed",
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        result: "failed",
+        summary: `Plan slice not found: ${sliceId}`,
+        usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 }
+      };
+    }
+
+    const runId = randomUUID();
+    const branch = task.targetBranch;
+    const worktreePath = join(tmpdir(), `darkfactory-codex-${task.specId.toLowerCase()}-${Date.now()}`);
+    let run: ImplementationRun = {
+      runId,
+      taskId: task.taskId,
+      provider: "openai-codex",
+      model: process.env.OPENAI_MODEL ?? "gpt-5-codex",
+      status: "running",
+      startedAt: new Date().toISOString(),
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0
+      }
+    };
+    this.runs.set(runId, { planRun: undefined, run, planArtifact: plan, artifact: null });
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      run = {
+        ...run,
+        status: "blocked",
+        finishedAt: new Date().toISOString(),
+        result: "blocked",
+        summary: "OPENAI_API_KEY is not configured",
+        metadata: {
+          branch,
+          phase: "implementation",
+          reason: "missing_openai_api_key"
+        }
+      };
+      this.runs.set(runId, { planRun: undefined, run, planArtifact: plan, artifact: null });
+      return run;
+    }
+
+    try {
+      await this.options.github.createOrResetBranch(this.options.owner, this.options.repo, branch, task.baseSha);
+      await execGit(this.options.repoRoot, ["worktree", "add", "-B", branch, worktreePath, task.baseSha]);
+      await execGit(worktreePath, ["checkout", branch]);
+
+      const contextText = await readContext(task.contextBundleRef);
+      const discovery = await discoverImplementationContext(worktreePath, task, contextText, slice.targetFiles, 12);
+      run = { ...run, discovery: discovery.trace };
+      this.runs.set(runId, { planRun: undefined, run, planArtifact: plan, artifact: null });
+
+      if (discovery.trace.blockedReason && discovery.trace.selectedContextFiles.length === 0) {
+        run = {
+          ...run,
+          status: "blocked",
+          finishedAt: new Date().toISOString(),
+          result: "blocked",
+          summary: discovery.trace.blockedReason,
+          metadata: {
+            ...(run.metadata ?? {}),
+            branch,
+            phase: "implementation_discovery",
+            reason: discovery.trace.blockedCategory ?? "discovery_blocked"
+          }
+        };
+        this.runs.set(runId, { planRun: undefined, run, planArtifact: plan, artifact: null });
         return run;
       }
 
@@ -186,7 +318,7 @@ export class CodexImplementationProvider implements ImplementationProvider {
         const lastAttempt = attempts.at(-1);
         const repairKind = attempt === 1 ? undefined : (patchCheck.kind === "apply" ? "apply" : "format");
         const prompt = attempt === 1
-          ? renderUserPrompt(task, contextText, discovery.promptContext)
+          ? renderSlicePrompt(task, slice, plan, contextText, discovery.promptContext)
           : repairKind === "apply"
             ? renderApplyRepairPrompt(
                 task,
@@ -198,7 +330,7 @@ export class CodexImplementationProvider implements ImplementationProvider {
               )
             : renderRepairPrompt(task, contextText, discovery.promptContext, lastAttempt?.rawOutputPreview ?? "", patchCheck.message);
 
-        parsed = await requestCodexResponse(apiKey, task, branch, prompt);
+        parsed = await requestCodexResponse(apiKey, task, branch, prompt, "implement");
         const rawOutputPath = join(worktreePath, "reports", "implementation", `${task.specId}.attempt-${attempt}.txt`);
         await writeFile(rawOutputPath, `${parsed.rawText}\n`, "utf8");
 
@@ -216,21 +348,13 @@ export class CodexImplementationProvider implements ImplementationProvider {
             metadata: {
               ...(run.metadata ?? {}),
               branch,
-              phase: "provider_response",
+              phase: "implementation",
               reason: "blocked_by_model",
-              attempts: [
-                ...attempts,
-                {
-                  attempt,
-                  responseId: parsed.responseId,
-                  repair: attempt > 1,
-                  repairKind,
-                  rawOutputPreview: truncate(parsed.rawText, 2000)
-                }
-              ]
+              requestDiagnostics: parsed.diagnostics,
+              attempts
             }
           };
-          this.runs.set(runId, { run, artifact: null });
+          this.runs.set(runId, { planRun: undefined, run, planArtifact: plan, artifact: null });
           await writeFile(summaryPath, `${parsed.summary}\n`, "utf8");
           return run;
         }
@@ -261,7 +385,6 @@ export class CodexImplementationProvider implements ImplementationProvider {
       }
 
       await writeFile(summaryPath, `${parsed.summary}\n`, "utf8");
-
       if (patchCheck.kind !== "ok") {
         run = {
           ...run,
@@ -275,12 +398,13 @@ export class CodexImplementationProvider implements ImplementationProvider {
           metadata: {
             ...(run.metadata ?? {}),
             branch,
-            phase: "provider_response",
-            reason: patchCheck.kind === "apply" ? "patch_does_not_apply" : "invalid_patch",
+            phase: "implementation",
+            failureStage: "slice_failed",
+            requestDiagnostics: parsed.diagnostics,
             attempts
           }
         };
-        this.runs.set(runId, { run, artifact: null });
+        this.runs.set(runId, { planRun: undefined, run, planArtifact: plan, artifact: null });
         return run;
       }
 
@@ -288,7 +412,6 @@ export class CodexImplementationProvider implements ImplementationProvider {
       await writeFile(patchPath, `${parsed.patch}\n`, "utf8");
       await execFileAsync("git", ["apply", "--reject", "--whitespace=nowarn", patchPath], { cwd: worktreePath, env: process.env });
       await cleanupScratchFiles(worktreePath);
-
       const changedFiles = await collectChangedFiles(worktreePath);
       const artifact = await publishBranchAndPullRequest({
         github: this.options.github,
@@ -298,8 +421,10 @@ export class CodexImplementationProvider implements ImplementationProvider {
         task,
         summaryText: parsed.summary,
         changedFiles,
-        runId
+        runId,
+        commitLabel: `feat(factory): implement ${task.specId} ${slice.sliceId}`
       });
+      artifact.sliceId = slice.sliceId;
 
       run = {
         ...run,
@@ -313,19 +438,23 @@ export class CodexImplementationProvider implements ImplementationProvider {
         metadata: {
           ...(run.metadata ?? {}),
           branch,
-          responseId: parsed.responseId,
+          phase: "implementation",
+          sliceId: slice.sliceId,
           requestDiagnostics: parsed.diagnostics,
           attempts
         }
       };
       this.runs.set(runId, {
+        planRun: undefined,
         run,
+        planArtifact: plan,
         artifact: {
           ...artifact,
           discovery: discovery.trace,
           metadata: {
             ...(artifact.metadata ?? {}),
-            discovery: discovery.trace
+            discovery: discovery.trace,
+            sliceId: slice.sliceId
           }
         }
       });
@@ -340,20 +469,29 @@ export class CodexImplementationProvider implements ImplementationProvider {
         metadata: {
           ...(run.metadata ?? {}),
           branch,
-          phase: "provider_execution",
-          failureClass: error instanceof OpenAiRequestError ? error.diagnostics.finalFailureClass : undefined,
+          phase: "implementation",
+          failureStage: "slice_failed",
+          failureClass: error instanceof OpenAiRequestError ? error.failureClass : undefined,
           requestDiagnostics: error instanceof OpenAiRequestError ? error.diagnostics : undefined,
-          errorName: error instanceof Error ? error.name : "Error",
-          stack: error instanceof Error ? error.stack : undefined
+          statusCode: error instanceof OpenAiRequestError ? error.statusCode : undefined,
+          timedOut: error instanceof OpenAiRequestError ? error.timedOut : undefined
         }
       };
-      this.runs.set(runId, { run, artifact: null });
+      this.runs.set(runId, { planRun: undefined, run, planArtifact: plan, artifact: null });
       return run;
     } finally {
       await execGit(this.options.repoRoot, ["checkout", task.baseBranch]).catch(() => undefined);
       await execGit(this.options.repoRoot, ["worktree", "remove", "--force", worktreePath]).catch(() => undefined);
       await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+
+  async getPlanningRun(runId: string): Promise<ImplementationPlanningRun | null> {
+    return this.runs.get(runId)?.planRun ?? null;
+  }
+
+  async collectPlanArtifact(runId: string): Promise<ImplementationPlanArtifact | null> {
+    return this.runs.get(runId)?.planArtifact ?? null;
   }
 
   async getRun(runId: string): Promise<ImplementationRun | null> {
@@ -365,12 +503,22 @@ export class CodexImplementationProvider implements ImplementationProvider {
     if (!entry) {
       return;
     }
-    entry.run = {
-      ...entry.run,
-      status: "canceled",
-      finishedAt: new Date().toISOString(),
-      result: entry.run.result ?? "blocked"
-    };
+    if (entry.run) {
+      entry.run = {
+        ...entry.run,
+        status: "canceled",
+        finishedAt: new Date().toISOString(),
+        result: entry.run.result ?? "blocked"
+      };
+    }
+    if (entry.planRun) {
+      entry.planRun = {
+        ...entry.planRun,
+        status: "canceled",
+        finishedAt: new Date().toISOString(),
+        result: entry.planRun.result ?? "blocked"
+      };
+    }
     this.runs.set(runId, entry);
   }
 
@@ -388,11 +536,12 @@ async function publishBranchAndPullRequest(params: {
   summaryText: string;
   changedFiles: string[];
   runId: string;
+  commitLabel?: string;
 }): Promise<ImplementationArtifact> {
   await execGit(params.worktreePath, ["config", "user.name", "github-actions[bot]"]);
   await execGit(params.worktreePath, ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
   await execGit(params.worktreePath, ["add", "."]);
-  await execGit(params.worktreePath, ["commit", "-m", `feat(factory): implement ${params.task.specId}`]);
+  await execGit(params.worktreePath, ["commit", "-m", params.commitLabel ?? `feat(factory): implement ${params.task.specId}`]);
   await execGit(params.worktreePath, ["push", "-u", "origin", params.task.targetBranch]);
 
   const existing = await params.github.findPullRequestByHead(params.owner, params.repo, `${params.owner}:${params.task.targetBranch}`);
@@ -457,13 +606,14 @@ async function cleanupScratchFiles(worktreePath: string): Promise<void> {
 async function discoverImplementationContext(
   worktreePath: string,
   task: ImplementationTask,
-  contextText: string
+  contextText: string,
+  mandatoryFiles: string[] = [],
+  supplementalLimit = Number.MAX_SAFE_INTEGER
 ): Promise<DiscoveryOutcome> {
   const parsedContext = parseContextBundleMetadata(contextText);
   const readPaths = parsedContext?.context?.readPaths?.length ? parsedContext.context.readPaths : ["**"];
-  const architectureHints = await readArchitectureHints(worktreePath, task.specId, parsedContext);
   const seedFiles = uniquePaths([
-    ...architectureHints.integrationPoints,
+    ...mandatoryFiles,
     ...(parsedContext?.context?.seedFiles ?? []),
     ...(parsedContext?.context?.relevantFiles ?? [])
   ]);
@@ -474,17 +624,7 @@ async function discoverImplementationContext(
   const keywords = extractDiscoveryKeywords(parsedContext);
   const contentMatches = await searchFilesByKeyword(worktreePath, keywords);
   const candidates = scoreDiscoveryCandidates(repoFiles, seedFiles, contentMatches, keywords);
-  const mandatoryFiles = uniquePaths([
-    ...architectureHints.artifactFiles,
-    ...architectureHints.integrationPoints
-  ]);
-  const selection = await selectContextFiles(
-    worktreePath,
-    candidates,
-    discoveryBudget,
-    mandatoryFiles,
-    architectureHints.integrationPoints.length > 0 ? 12 : undefined
-  );
+  const selection = await selectContextFiles(worktreePath, candidates, discoveryBudget, uniquePaths(mandatoryFiles), supplementalLimit);
 
   if (selection.selectedFiles.length === 0) {
     const blockedReason = `Blocked: Discovery could not identify plausible integration points for ${task.specId} within the configured read budget.`;
@@ -520,12 +660,43 @@ async function discoverImplementationContext(
   };
 }
 
-function renderUserPrompt(task: ImplementationTask, contextText: string, discoveredContext: string): string {
+function renderPlanningPrompt(task: ImplementationTask, contextText: string, discoveredContext: string): string {
   return [
-    `Implement accepted spec ${task.specId}.`,
+    `Plan implementation for accepted spec ${task.specId}.`,
     `Allowed paths: ${task.allowedPaths.join(", ")}.`,
     `Blocked paths: ${task.policy.blockedPaths.join(", ")}.`,
     `Required scenarios: ${task.verificationTargets.join(", ")}.`,
+    "Return JSON only with this shape:",
+    `{"summary":"","targetFiles":[],"testFiles":[],"evidenceTargets":[],"risks":[],"blockedReason":null,"slices":[{"sliceId":"","title":"","goal":"","targetFiles":[],"expectedTests":[],"expectedEvidence":[],"writeScope":[],"dependsOnSliceIds":[]}]} `,
+    "Rules:",
+    "- No markdown or prose outside JSON.",
+    "- At least one slice, at most four slices.",
+    "- Slice 1 must be narrowly scoped and touch no more than eight files.",
+    "- Each required scenario must be covered by one or more slices.",
+    "- If blocked, set blockedReason and return an empty slices array.",
+    "",
+    "Context bundle:",
+    contextText,
+    "",
+    discoveredContext
+  ].join("\n");
+}
+
+function renderSlicePrompt(
+  task: ImplementationTask,
+  slice: ImplementationPlanSlice,
+  plan: ImplementationPlanArtifact,
+  contextText: string,
+  discoveredContext: string
+): string {
+  return [
+    `Implement slice ${slice.sliceId} for accepted spec ${task.specId}.`,
+    `Slice title: ${slice.title}`,
+    `Slice goal: ${slice.goal}`,
+    `Slice target files: ${slice.targetFiles.join(", ")}`,
+    `Slice write scope: ${slice.writeScope.join(", ")}`,
+    `Expected tests: ${slice.expectedTests.join(", ")}`,
+    `Expected evidence: ${slice.expectedEvidence.join(", ")}`,
     "Return only two sections:",
     "SUMMARY:",
     "<short explanation>",
@@ -540,6 +711,18 @@ function renderUserPrompt(task: ImplementationTask, contextText: string, discove
     "The PATCH section must be a valid unified diff that git apply can consume directly.",
     "Do not return prose, markdown lists, or code fences outside the required SUMMARY/PATCH structure.",
     "If the task is blocked, start SUMMARY with 'Blocked:' and leave the PATCH section empty.",
+    "",
+    "Approved plan artifact:",
+    JSON.stringify({
+      planId: plan.planId,
+      summary: plan.summary,
+      slices: plan.slices.map((entry) => ({
+        sliceId: entry.sliceId,
+        title: entry.title,
+        targetFiles: entry.targetFiles,
+        dependsOnSliceIds: entry.dependsOnSliceIds
+      }))
+    }, null, 2),
     "",
     "Context bundle:",
     contextText,
@@ -765,8 +948,8 @@ async function selectContextFiles(
   worktreePath: string,
   candidates: FileCandidate[],
   discoveryBudget: ImplementationDiscoveryBudget,
-  mandatoryFiles: string[] = [],
-  maxSupplementalFiles?: number
+  mandatoryFiles: string[],
+  supplementalLimit: number
 ): Promise<{
   readFiles: string[];
   selectedFiles: string[];
@@ -779,51 +962,15 @@ async function selectContextFiles(
   const selectedFiles: string[] = [];
   const snapshots: string[] = [];
   let bytes = 0;
-  let supplementalCount = 0;
-  const mandatorySet = new Set(mandatoryFiles);
-
-  for (const mandatoryPath of mandatoryFiles) {
-    const candidate = candidates.find((entry) => entry.path === mandatoryPath) ?? {
-      path: mandatoryPath,
-      score: 999,
-      reasons: ["architecture-selected file"]
-    };
-    try {
-      const contents = await readFile(join(worktreePath, candidate.path), "utf8");
-      const contentBytes = Buffer.byteLength(contents);
-      readFiles.push(candidate.path);
-      if (selectedFiles.length >= discoveryBudget.maxFiles) {
-        break;
-      }
-      if (bytes + contentBytes > discoveryBudget.maxBytes && selectedFiles.length > 0) {
-        continue;
-      }
-      if (!selectedFiles.includes(candidate.path)) {
-        selectedFiles.push(candidate.path);
-        selectionReasons[candidate.path] = candidate.reasons.join("; ") || "selected by architecture";
-        bytes += contentBytes;
-        snapshots.push([
-          `FILE: ${candidate.path}`,
-          `REASON: ${selectionReasons[candidate.path]}`,
-          "```",
-          truncate(contents, 8000),
-          "```"
-        ].join("\n"));
-      }
-    } catch {
-      continue;
-    }
-  }
+  let supplementalFiles = 0;
 
   for (const candidate of candidates) {
     if (selectedFiles.length >= discoveryBudget.maxFiles) {
       break;
     }
-    if (mandatorySet.has(candidate.path)) {
+    const required = mandatoryFiles.includes(candidate.path);
+    if (!required && supplementalFiles >= supplementalLimit) {
       continue;
-    }
-    if (maxSupplementalFiles !== undefined && supplementalCount >= maxSupplementalFiles) {
-      break;
     }
 
     try {
@@ -837,7 +984,9 @@ async function selectContextFiles(
       selectedFiles.push(candidate.path);
       selectionReasons[candidate.path] = candidate.reasons.join("; ") || "selected by discovery";
       bytes += contentBytes;
-      supplementalCount += 1;
+      if (!required) {
+        supplementalFiles += 1;
+      }
       snapshots.push([
         `FILE: ${candidate.path}`,
         `REASON: ${selectionReasons[candidate.path]}`,
@@ -862,29 +1011,6 @@ async function selectContextFiles(
   };
 }
 
-async function readArchitectureHints(
-  worktreePath: string,
-  specId: string,
-  parsedContext: ParsedContextBundle | null
-): Promise<{ artifactFiles: string[]; integrationPoints: string[] }> {
-  const artifactRoot = `architecture/${specId}`;
-  const artifactFiles = (parsedContext?.context?.relevantFiles ?? []).filter((path) => path.startsWith(`${artifactRoot}/`));
-  const integrationFile = artifactFiles.find((path) => path.endsWith("/integration-points.json"));
-  if (!integrationFile) {
-    return { artifactFiles, integrationPoints: [] };
-  }
-
-  try {
-    const payload = JSON.parse(await readFile(join(worktreePath, integrationFile), "utf8")) as Array<{ path: string }>;
-    return {
-      artifactFiles,
-      integrationPoints: uniquePaths(payload.map((entry) => entry.path))
-    };
-  } catch {
-    return { artifactFiles, integrationPoints: [] };
-  }
-}
-
 function renderDiscoveredContext(snapshots: string[], discoveryGoals: string[]): string {
   return [
     "## Discovery Goals",
@@ -899,69 +1025,135 @@ function uniquePaths(paths: string[]): string[] {
   return [...new Set(paths.filter(Boolean))];
 }
 
-async function requestCodexResponse(apiKey: string, task: ImplementationTask, branch: string, prompt: string): Promise<ParsedCodexResponse> {
-  const { payload, diagnostics } = await requestOpenAiText(apiKey, {
-    model: process.env.OPENAI_MODEL ?? "gpt-5-codex",
-    input: [
-      {
-        role: "system",
-        content: [{ type: "input_text", text: SYSTEM_PROMPT }]
-      },
-      {
-        role: "user",
-        content: [{ type: "input_text", text: prompt }]
-      }
-    ],
-    text: { format: { type: "text" } },
+async function requestPlanResponse(
+  apiKey: string,
+  task: ImplementationTask,
+  branch: string,
+  contextText: string,
+  discoveredContext: string
+): Promise<ParsedPlanResponse> {
+  const response = await requestOpenAiText({
+    apiKey,
+    prompt: renderPlanningPrompt(task, contextText, discoveredContext),
+    systemPrompt: PLANNING_SYSTEM_PROMPT,
     metadata: {
       specId: task.specId,
       taskId: task.taskId,
-      branch
-    }
+      branch,
+      stage: "implementation-plan"
+    },
+    timeoutMs: Number(process.env.OPENAI_PLANNING_TIMEOUT_MS ?? 90_000),
+    maxAttempts: Number(process.env.OPENAI_PLANNING_MAX_ATTEMPTS ?? 3),
+    backoffMs: Number(process.env.OPENAI_PLANNING_BACKOFF_MS ?? 1_000)
   });
-  const inputTokens = Number((payload.usage as Record<string, unknown> | undefined)?.input_tokens ?? 0);
-  const outputTokens = Number((payload.usage as Record<string, unknown> | undefined)?.output_tokens ?? 0);
-  const rawText = extractOutputText(payload);
   return {
-    responseId: typeof payload.id === "string" ? payload.id : undefined,
-    rawText,
-    summary: extractSummary(rawText),
-    patch: extractPatch(rawText),
-    diagnostics,
+    responseId: response.responseId,
+    rawText: response.rawText,
+    plan: parsePlanArtifact(response.rawText, task),
+    diagnostics: response.diagnostics,
     usage: {
-      inputTokens,
-      outputTokens,
-      estimatedCostUsd: estimateCost(inputTokens, outputTokens)
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+      estimatedCostUsd: response.estimatedCostUsd
     }
   };
 }
 
-function extractOutputText(payload: Record<string, unknown>): string {
-  const direct = payload.output_text;
-  if (typeof direct === "string" && direct.trim()) {
-    return direct.trim();
-  }
+async function requestCodexResponse(
+  apiKey: string,
+  task: ImplementationTask,
+  branch: string,
+  prompt: string,
+  phase: "implement" | "repair"
+): Promise<ParsedCodexResponse> {
+  const response = await requestOpenAiText({
+    apiKey,
+    prompt,
+    systemPrompt: IMPLEMENTATION_SYSTEM_PROMPT,
+    metadata: {
+      specId: task.specId,
+      taskId: task.taskId,
+      branch,
+      stage: phase
+    },
+    timeoutMs: Number(process.env.OPENAI_IMPLEMENT_TIMEOUT_MS ?? 120_000),
+    maxAttempts: Number(process.env.OPENAI_IMPLEMENT_MAX_ATTEMPTS ?? 4),
+    backoffMs: Number(process.env.OPENAI_IMPLEMENT_BACKOFF_MS ?? 1_500)
+  });
+  const rawText = response.rawText;
+  return {
+    responseId: response.responseId,
+    rawText,
+    summary: extractSummary(rawText),
+    patch: extractPatch(rawText),
+    usage: {
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+      estimatedCostUsd: response.estimatedCostUsd
+    },
+    diagnostics: response.diagnostics
+  };
+}
 
-  const output = Array.isArray(payload.output) ? payload.output : [];
-  const text = output
-    .flatMap((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return [];
-      }
-      const content = Array.isArray((entry as { content?: unknown[] }).content) ? (entry as { content: unknown[] }).content : [];
-      return content
-        .map((part) => {
-          if (!part || typeof part !== "object") {
-            return "";
-          }
-          return typeof (part as { text?: unknown }).text === "string" ? String((part as { text?: unknown }).text) : "";
-        })
-        .filter(Boolean);
-    })
-    .join("\n")
-    .trim();
+function parsePlanArtifact(rawText: string, task: ImplementationTask): ImplementationPlanArtifact {
+  const parsed = JSON.parse(rawText) as Partial<ImplementationPlanArtifact>;
+  return {
+    runId: "",
+    taskId: task.taskId,
+    planId: typeof parsed.planId === "string" && parsed.planId ? parsed.planId : randomUUID(),
+    specId: task.specId,
+    summary: typeof parsed.summary === "string" ? parsed.summary : "",
+    targetFiles: Array.isArray(parsed.targetFiles) ? parsed.targetFiles.map(String) : [],
+    testFiles: Array.isArray(parsed.testFiles) ? parsed.testFiles.map(String) : [],
+    evidenceTargets: Array.isArray(parsed.evidenceTargets) ? parsed.evidenceTargets.map(String) : [],
+    slices: Array.isArray(parsed.slices) ? parsed.slices.map(normalizePlanSlice) : [],
+    risks: Array.isArray(parsed.risks) ? parsed.risks.map(String) : [],
+    blockedReason: typeof parsed.blockedReason === "string" && parsed.blockedReason ? parsed.blockedReason : undefined,
+    selectedContextFiles: [],
+    metadata: {}
+  };
+}
 
-  return text || "SUMMARY:\nCodex run completed without textual summary.\nPATCH:\n```diff\n\n```";
+function normalizePlanSlice(slice: unknown): ImplementationPlanSlice {
+  const parsed = (slice ?? {}) as Record<string, unknown>;
+  return {
+    sliceId: typeof parsed.sliceId === "string" && parsed.sliceId ? parsed.sliceId : `slice-${randomUUID().slice(0, 8)}`,
+    title: typeof parsed.title === "string" ? parsed.title : "",
+    goal: typeof parsed.goal === "string" ? parsed.goal : "",
+    targetFiles: Array.isArray(parsed.targetFiles) ? parsed.targetFiles.map(String) : [],
+    expectedTests: Array.isArray(parsed.expectedTests) ? parsed.expectedTests.map(String) : [],
+    expectedEvidence: Array.isArray(parsed.expectedEvidence) ? parsed.expectedEvidence.map(String) : [],
+    writeScope: Array.isArray(parsed.writeScope) ? parsed.writeScope.map(String) : [],
+    dependsOnSliceIds: Array.isArray(parsed.dependsOnSliceIds) ? parsed.dependsOnSliceIds.map(String) : []
+  };
+}
+
+function normalizePlanArtifact(
+  artifact: ImplementationPlanArtifact,
+  task: ImplementationTask,
+  discovery: ImplementationDiscoveryTrace
+): ImplementationPlanArtifact {
+  return {
+    ...artifact,
+    taskId: task.taskId,
+    specId: task.specId,
+    targetFiles: uniquePaths(artifact.targetFiles),
+    testFiles: uniquePaths(artifact.testFiles),
+    evidenceTargets: uniquePaths(artifact.evidenceTargets),
+    slices: artifact.slices.map((slice) => ({
+      ...slice,
+      targetFiles: uniquePaths(slice.targetFiles),
+      expectedTests: uniquePaths(slice.expectedTests),
+      expectedEvidence: uniquePaths(slice.expectedEvidence),
+      writeScope: uniquePaths(slice.writeScope),
+      dependsOnSliceIds: uniquePaths(slice.dependsOnSliceIds)
+    })),
+    selectedContextFiles: discovery.selectedContextFiles,
+    metadata: {
+      ...(artifact.metadata ?? {}),
+      updatedAt: new Date().toISOString()
+    }
+  };
 }
 
 function extractSummary(text: string): string {
@@ -1082,27 +1274,31 @@ function matchesAny(path: string, patterns: string[]): boolean {
   });
 }
 
-function estimateCost(inputTokens: number, outputTokens: number): number {
-  return Number((((inputTokens / 1_000_000) * 1.25) + ((outputTokens / 1_000_000) * 10)).toFixed(6));
-}
-
 async function execGit(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return await execFileAsync("git", args, { cwd, env: process.env });
 }
 
-const SYSTEM_PROMPT = [
+const PLANNING_SYSTEM_PROMPT = [
+  "You are the dark factory implementation planning worker.",
+  "Return JSON only.",
+  "Break the work into 1-4 implementation slices.",
+  "Make slice 1 small and safe.",
+  "If the architecture artifacts are insufficient or contradictory, return blockedReason and no slices."
+].join(" ");
+
+const IMPLEMENTATION_SYSTEM_PROMPT = [
   "You are the dark factory implementation worker.",
-  "Implement only the accepted spec described by the caller.",
-  "Stay inside the allowed paths.",
+  "Implement only the requested slice.",
+  "Stay inside the allowed paths and the slice write scope.",
   "Produce a small, reviewable unified diff.",
   "Prefer code and tests over prose.",
-  "If the spec is ambiguous or unsafe, stop and explain the blocker."
+  "If the slice is ambiguous or unsafe, stop and explain the blocker."
 ].join(" ");
 
 export const codexProviderInternals = {
-  extractOutputText,
   extractSummary,
   extractPatch,
+  parsePlanArtifact,
   checkPatchText,
   classifyBlockedResponse,
   isLikelyUnifiedDiff,
@@ -1111,7 +1307,6 @@ export const codexProviderInternals = {
   extractDiscoveryKeywords,
   scoreDiscoveryCandidates,
   selectContextFiles,
-  readArchitectureHints,
   renderDiscoveredContext,
   renderRepairPrompt,
   renderApplyRepairPrompt,

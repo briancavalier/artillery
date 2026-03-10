@@ -83,6 +83,8 @@ async function route(request: IncomingMessage, response: ServerResponse, store: 
     })));
     const taskDetails = await Promise.all(implementationTasks.slice(0, 25).map(async (task) => ({
       task,
+      planningRun: task.planId ? await store.findImplementationPlanArtifactBySpecId(task.specId).then((plan) => plan?.runId ? store.getImplementationPlanningRun(plan.runId) : null) : null,
+      plan: task.planId ? await store.findImplementationPlanArtifactBySpecId(task.specId) : null,
       run: task.runId ? await store.getImplementationRun(task.runId) : null,
       artifact: task.runId ? await store.getImplementationArtifact(task.runId) : null
     })));
@@ -420,6 +422,8 @@ function renderDashboard(
   }>,
   taskDetails: Array<{
     task: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["listImplementationTasks"]>>[number];
+    planningRun: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["getImplementationPlanningRun"]>> | null;
+    plan: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["findImplementationPlanArtifactBySpecId"]>> | null;
     run: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["getImplementationRun"]>>;
     artifact: Awaited<ReturnType<Awaited<ReturnType<typeof createFactoryStore>>["getImplementationArtifact"]>>;
   }>
@@ -435,8 +439,9 @@ function renderDashboard(
     }).join("")
     : `<tr><td colspan="4" class="empty">No deployments recorded.</td></tr>`;
   const taskRows = taskDetails.length > 0
-    ? taskDetails.map(({ task, run }) => {
+    ? taskDetails.map(({ task, plan, planningRun, run }) => {
       const discovery = run?.discovery;
+      const planningSelected = planningRun?.discovery?.selectedContextFiles ?? plan?.selectedContextFiles ?? [];
       const discoverySummary = discovery
         ? [
             `selected=${discovery.selectedContextFiles.length}`,
@@ -445,9 +450,10 @@ function renderDashboard(
           ].filter(Boolean).join(" | ")
         : "";
       const selected = discovery?.selectedContextFiles?.slice(0, 5).join(", ") ?? "";
-      return `<tr><td>${escapeHtml(task.specId)}</td><td>${escapeHtml(task.status)}</td><td>${escapeHtml(task.provider ?? "")}</td><td>${escapeHtml(task.model ?? "")}</td><td>${escapeHtml(task.updatedAt)}</td><td class="metadata">${escapeHtml(discoverySummary)}</td><td class="metadata">${escapeHtml(selected)}</td></tr>`;
+      const sliceSummary = task.sliceId ? `${task.sliceId} (${(task.sliceIndex ?? 0) + 1}/${task.totalSlices ?? 1})` : "plan";
+      return `<tr><td>${escapeHtml(task.specId)}</td><td>${escapeHtml(task.status)}</td><td>${escapeHtml(task.provider ?? "")}</td><td>${escapeHtml(task.model ?? "")}</td><td>${escapeHtml(task.updatedAt)}</td><td class="metadata">${escapeHtml(sliceSummary)}</td><td class="metadata">${escapeHtml(discoverySummary)}</td><td class="metadata">${escapeHtml(planningSelected.slice(0, 5).join(", "))}</td><td class="metadata">${escapeHtml(selected)}</td></tr>`;
     }).join("")
-    : `<tr><td colspan="7" class="empty">No implementation tasks recorded.</td></tr>`;
+    : `<tr><td colspan="9" class="empty">No implementation tasks recorded.</td></tr>`;
   const architectureRows = architectureDetails.length > 0
     ? architectureDetails.map(({ task, artifact, run }) => {
       const selected = Array.isArray(run?.metadata?.selectedContextFiles)
@@ -514,7 +520,7 @@ function renderDashboard(
     </section>
     <section class="card"><h2>Recent Deployments</h2><table><thead><tr><th>At</th><th>Spec</th><th>Deploy</th><th>Metadata</th></tr></thead><tbody>${deploymentRows}</tbody></table></section>
     <section class="card"><h2>Architecture Tasks</h2><table><thead><tr><th>Spec</th><th>Status</th><th>Provider</th><th>Updated</th><th>Selected Files</th><th>Invariants</th></tr></thead><tbody>${architectureRows}</tbody></table></section>
-    <section class="card"><h2>Implementation Tasks</h2><table><thead><tr><th>Spec</th><th>Status</th><th>Provider</th><th>Model</th><th>Updated</th><th>Discovery</th><th>Selected Files</th></tr></thead><tbody>${taskRows}</tbody></table></section>
+    <section class="card"><h2>Implementation Tasks</h2><table><thead><tr><th>Spec</th><th>Status</th><th>Provider</th><th>Model</th><th>Updated</th><th>Slice</th><th>Discovery</th><th>Plan Files</th><th>Selected Files</th></tr></thead><tbody>${taskRows}</tbody></table></section>
   </div>
 </body>
 </html>`;

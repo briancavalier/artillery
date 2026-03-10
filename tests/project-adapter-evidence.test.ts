@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createTempWorkspace, readJson } from "./helpers.js";
 import { buildArtilleryImplementationContext } from "../packages/project-adapter-artillery/src/context.js";
@@ -70,6 +70,10 @@ test("artillery implementation context includes terrain discovery hints for SPEC
     specId: "SPEC-0003",
     title: "High resolution terrain"
   };
+  await mkdir(join(workspace, "apps/artillery-game/src/shared"), { recursive: true });
+  await mkdir(join(workspace, "apps/artillery-game/src/client"), { recursive: true });
+  await writeFile(join(workspace, "apps/artillery-game/src/shared/simulation.ts"), "export const simulation = {};\n", "utf8");
+  await writeFile(join(workspace, "apps/artillery-game/src/client/main.ts"), "export const main = {};\n", "utf8");
   await writeFile(join(workspace, "specs", "SPEC-0003.json"), `${JSON.stringify(spec, null, 2)}\n`, "utf8");
 
   const context = await buildArtilleryImplementationContext(join(workspace, "specs"), "SPEC-0003");

@@ -3,15 +3,17 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Client } from "pg";
 import {
+  type ArchitectureArtifact,
+  type ArchitectureRun,
+  type ArchitectureTask,
+  type ArchitectureTaskRequest,
+  type ImplementationPlanArtifact,
+  type ImplementationPlanningRun,
   isFactoryEventLocalMode,
   summarizeCanary,
   summarizeProjectHealth,
   verifyScenario,
   type AgentQualityStatus,
-  type ArchitectureArtifact,
-  type ArchitectureRun,
-  type ArchitectureTask,
-  type ArchitectureTaskRequest,
   type CloudEventEnvelope,
   type FactoryAdminStatus,
   type FactoryEventsQuery,
@@ -43,6 +45,8 @@ interface FileState {
   architectureRuns: ArchitectureRun[];
   architectureArtifacts: ArchitectureArtifact[];
   implementationTasks: ImplementationTask[];
+  implementationPlanningRuns: ImplementationPlanningRun[];
+  implementationPlanArtifacts: ImplementationPlanArtifact[];
   implementationRuns: ImplementationRun[];
   implementationArtifacts: ImplementationArtifact[];
 }
@@ -120,33 +124,6 @@ class FileFactoryStore implements FactoryStore {
       deployId: event.data.deployId,
       metadata: event.data.metadata ?? {}
     }));
-  }
-
-  async enqueueImplementationTask(payload: ImplementationTaskRequest): Promise<ImplementationTask> {
-    const state = await this.read();
-    const task: ImplementationTask = {
-      taskId: randomUUID(),
-      specId: payload.specId,
-      source: payload.source,
-      owner: payload.owner,
-      repo: payload.repo,
-      baseBranch: payload.baseBranch,
-      baseSha: payload.baseSha,
-      targetBranch: payload.targetBranch,
-      allowedPaths: payload.allowedPaths,
-      verificationTargets: payload.verificationTargets,
-      contextBundleRef: payload.contextBundleRef,
-      attempt: 0,
-      priority: payload.priority,
-      limits: payload.limits,
-      policy: payload.policy,
-      status: "queued",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    state.implementationTasks.push(task);
-    await this.write(state);
-    return task;
   }
 
   async enqueueArchitectureTask(payload: ArchitectureTaskRequest): Promise<ArchitectureTask> {
@@ -256,6 +233,37 @@ class FileFactoryStore implements FactoryStore {
     return state.architectureArtifacts.find((artifact) => artifact.runId === runId) ?? null;
   }
 
+  async enqueueImplementationTask(payload: ImplementationTaskRequest): Promise<ImplementationTask> {
+    const state = await this.read();
+    const task: ImplementationTask = {
+      taskId: randomUUID(),
+      specId: payload.specId,
+      source: payload.source,
+      owner: payload.owner,
+      repo: payload.repo,
+      baseBranch: payload.baseBranch,
+      baseSha: payload.baseSha,
+      targetBranch: payload.targetBranch,
+      allowedPaths: payload.allowedPaths,
+      verificationTargets: payload.verificationTargets,
+      contextBundleRef: payload.contextBundleRef,
+      attempt: 0,
+      priority: payload.priority,
+      limits: payload.limits,
+      policy: payload.policy,
+      planId: payload.planId,
+      sliceId: payload.sliceId,
+      sliceIndex: payload.sliceIndex,
+      totalSlices: payload.totalSlices,
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    state.implementationTasks.push(task);
+    await this.write(state);
+    return task;
+  }
+
   async listImplementationTasks(): Promise<ImplementationTask[]> {
     const state = await this.read();
     return [...state.implementationTasks].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -305,6 +313,45 @@ class FileFactoryStore implements FactoryStore {
     await this.write(state);
   }
 
+  async writeImplementationPlanningRun(run: ImplementationPlanningRun): Promise<void> {
+    const state = await this.read();
+    const index = state.implementationPlanningRuns.findIndex((entry) => entry.runId === run.runId);
+    if (index >= 0) {
+      state.implementationPlanningRuns[index] = structuredClone(run);
+    } else {
+      state.implementationPlanningRuns.push(structuredClone(run));
+    }
+    await this.write(state);
+  }
+
+  async getImplementationPlanningRun(runId: string): Promise<ImplementationPlanningRun | null> {
+    const state = await this.read();
+    return state.implementationPlanningRuns.find((run) => run.runId === runId) ?? null;
+  }
+
+  async writeImplementationPlanArtifact(artifact: ImplementationPlanArtifact): Promise<void> {
+    const state = await this.read();
+    const index = state.implementationPlanArtifacts.findIndex((entry) => entry.planId === artifact.planId);
+    if (index >= 0) {
+      state.implementationPlanArtifacts[index] = structuredClone(artifact);
+    } else {
+      state.implementationPlanArtifacts.push(structuredClone(artifact));
+    }
+    await this.write(state);
+  }
+
+  async getImplementationPlanArtifact(runId: string): Promise<ImplementationPlanArtifact | null> {
+    const state = await this.read();
+    return state.implementationPlanArtifacts.find((artifact) => artifact.runId === runId) ?? null;
+  }
+
+  async findImplementationPlanArtifactBySpecId(specId: string): Promise<ImplementationPlanArtifact | null> {
+    const state = await this.read();
+    return [...state.implementationPlanArtifacts]
+      .filter((artifact) => artifact.specId === specId)
+      .sort((a, b) => String(b.metadata?.updatedAt ?? "").localeCompare(String(a.metadata?.updatedAt ?? "")) || b.planId.localeCompare(a.planId))[0] ?? null;
+  }
+
   async writeImplementationRun(run: ImplementationRun): Promise<void> {
     const state = await this.read();
     const index = state.implementationRuns.findIndex((entry) => entry.runId === run.runId);
@@ -346,6 +393,8 @@ class FileFactoryStore implements FactoryStore {
       architectureRuns: parsed.architectureRuns ?? [],
       architectureArtifacts: parsed.architectureArtifacts ?? [],
       implementationTasks: parsed.implementationTasks ?? [],
+      implementationPlanningRuns: parsed.implementationPlanningRuns ?? [],
+      implementationPlanArtifacts: parsed.implementationPlanArtifacts ?? [],
       implementationRuns: parsed.implementationRuns ?? [],
       implementationArtifacts: parsed.implementationArtifacts ?? []
     };
@@ -405,6 +454,24 @@ class PostgresFactoryStore implements FactoryStore {
         spec_id TEXT NOT NULL,
         status TEXT NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL,
+        payload JSONB NOT NULL
+      )
+    `);
+    await this.client.query(`
+      CREATE TABLE IF NOT EXISTS implementation_planning_runs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL,
+        payload JSONB NOT NULL
+      )
+    `);
+    await this.client.query(`
+      CREATE TABLE IF NOT EXISTS implementation_plan_artifacts (
+        plan_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        spec_id TEXT NOT NULL,
         payload JSONB NOT NULL
       )
     `);
@@ -519,31 +586,6 @@ class PostgresFactoryStore implements FactoryStore {
     }));
   }
 
-  async enqueueImplementationTask(payload: ImplementationTaskRequest): Promise<ImplementationTask> {
-    const task: ImplementationTask = {
-      taskId: randomUUID(),
-      specId: payload.specId,
-      source: payload.source,
-      owner: payload.owner,
-      repo: payload.repo,
-      baseBranch: payload.baseBranch,
-      baseSha: payload.baseSha,
-      targetBranch: payload.targetBranch,
-      allowedPaths: payload.allowedPaths,
-      verificationTargets: payload.verificationTargets,
-      contextBundleRef: payload.contextBundleRef,
-      attempt: 0,
-      priority: payload.priority,
-      limits: payload.limits,
-      policy: payload.policy,
-      status: "queued",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    await this.writeImplementationTask(task);
-    return task;
-  }
-
   async enqueueArchitectureTask(payload: ArchitectureTaskRequest): Promise<ArchitectureTask> {
     const task: ArchitectureTask = {
       taskId: randomUUID(),
@@ -569,17 +611,12 @@ class PostgresFactoryStore implements FactoryStore {
   }
 
   async listArchitectureTasks(): Promise<ArchitectureTask[]> {
-    const result = await this.client.query(
-      `SELECT payload FROM architecture_tasks ORDER BY updated_at DESC LIMIT 500`
-    );
-    return result.rows.map((row: { payload: ArchitectureTask }) => row.payload);
+    const result = await this.client.query(`SELECT payload FROM architecture_tasks ORDER BY updated_at DESC`);
+    return result.rows.map((row) => row.payload as ArchitectureTask);
   }
 
   async getArchitectureTask(taskId: string): Promise<ArchitectureTask | null> {
-    const result = await this.client.query(
-      `SELECT payload FROM architecture_tasks WHERE id = $1 LIMIT 1`,
-      [taskId]
-    );
+    const result = await this.client.query(`SELECT payload FROM architecture_tasks WHERE id = $1 LIMIT 1`, [taskId]);
     return (result.rows[0]?.payload as ArchitectureTask | undefined) ?? null;
   }
 
@@ -593,7 +630,10 @@ class PostgresFactoryStore implements FactoryStore {
 
   async leaseArchitectureTask(): Promise<ArchitectureTask | null> {
     const result = await this.client.query(
-      `SELECT payload FROM architecture_tasks WHERE status = 'queued' ORDER BY updated_at ASC LIMIT 1`
+      `SELECT payload FROM architecture_tasks
+       WHERE status = 'queued'
+       ORDER BY (payload->>'priority')::int DESC, (payload->>'createdAt') ASC
+       LIMIT 1`
     );
     const task = result.rows[0]?.payload as ArchitectureTask | undefined;
     if (!task) {
@@ -615,11 +655,12 @@ class PostgresFactoryStore implements FactoryStore {
   }
 
   async writeArchitectureRun(run: ArchitectureRun): Promise<void> {
+    const updatedAt = run.finishedAt ?? run.startedAt;
     await this.client.query(
       `INSERT INTO architecture_runs (id, task_id, status, updated_at, payload)
        VALUES ($1, $2, $3, $4::timestamptz, $5::jsonb)
        ON CONFLICT (id) DO UPDATE SET task_id = EXCLUDED.task_id, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at, payload = EXCLUDED.payload`,
-      [run.runId, run.taskId, run.status, run.finishedAt ?? run.startedAt, JSON.stringify(run)]
+      [run.runId, run.taskId, run.status, updatedAt, JSON.stringify(run)]
     );
   }
 
@@ -640,6 +681,35 @@ class PostgresFactoryStore implements FactoryStore {
   async getArchitectureArtifact(runId: string): Promise<ArchitectureArtifact | null> {
     const result = await this.client.query(`SELECT payload FROM architecture_artifacts WHERE run_id = $1 LIMIT 1`, [runId]);
     return (result.rows[0]?.payload as ArchitectureArtifact | undefined) ?? null;
+  }
+
+  async enqueueImplementationTask(payload: ImplementationTaskRequest): Promise<ImplementationTask> {
+    const task: ImplementationTask = {
+      taskId: randomUUID(),
+      specId: payload.specId,
+      source: payload.source,
+      owner: payload.owner,
+      repo: payload.repo,
+      baseBranch: payload.baseBranch,
+      baseSha: payload.baseSha,
+      targetBranch: payload.targetBranch,
+      allowedPaths: payload.allowedPaths,
+      verificationTargets: payload.verificationTargets,
+      contextBundleRef: payload.contextBundleRef,
+      attempt: 0,
+      priority: payload.priority,
+      limits: payload.limits,
+      policy: payload.policy,
+      planId: payload.planId,
+      sliceId: payload.sliceId,
+      sliceIndex: payload.sliceIndex,
+      totalSlices: payload.totalSlices,
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await this.writeImplementationTask(task);
+    return task;
   }
 
   async listImplementationTasks(): Promise<ImplementationTask[]> {
@@ -686,6 +756,42 @@ class PostgresFactoryStore implements FactoryStore {
        ON CONFLICT (id) DO UPDATE SET spec_id = EXCLUDED.spec_id, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at, payload = EXCLUDED.payload`,
       [task.taskId, task.specId, task.status, task.updatedAt, JSON.stringify(task)]
     );
+  }
+
+  async writeImplementationPlanningRun(run: ImplementationPlanningRun): Promise<void> {
+    await this.client.query(
+      `INSERT INTO implementation_planning_runs (id, task_id, status, updated_at, payload)
+       VALUES ($1, $2, $3, $4::timestamptz, $5::jsonb)
+       ON CONFLICT (id) DO UPDATE SET task_id = EXCLUDED.task_id, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at, payload = EXCLUDED.payload`,
+      [run.runId, run.taskId, run.status, run.finishedAt ?? run.startedAt, JSON.stringify(run)]
+    );
+  }
+
+  async getImplementationPlanningRun(runId: string): Promise<ImplementationPlanningRun | null> {
+    const result = await this.client.query(`SELECT payload FROM implementation_planning_runs WHERE id = $1 LIMIT 1`, [runId]);
+    return (result.rows[0]?.payload as ImplementationPlanningRun | undefined) ?? null;
+  }
+
+  async writeImplementationPlanArtifact(artifact: ImplementationPlanArtifact): Promise<void> {
+    await this.client.query(
+      `INSERT INTO implementation_plan_artifacts (plan_id, run_id, task_id, spec_id, payload)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
+       ON CONFLICT (plan_id) DO UPDATE SET run_id = EXCLUDED.run_id, task_id = EXCLUDED.task_id, spec_id = EXCLUDED.spec_id, payload = EXCLUDED.payload`,
+      [artifact.planId, artifact.runId, artifact.taskId, artifact.specId, JSON.stringify(artifact)]
+    );
+  }
+
+  async getImplementationPlanArtifact(runId: string): Promise<ImplementationPlanArtifact | null> {
+    const result = await this.client.query(`SELECT payload FROM implementation_plan_artifacts WHERE run_id = $1 LIMIT 1`, [runId]);
+    return (result.rows[0]?.payload as ImplementationPlanArtifact | undefined) ?? null;
+  }
+
+  async findImplementationPlanArtifactBySpecId(specId: string): Promise<ImplementationPlanArtifact | null> {
+    const result = await this.client.query(
+      `SELECT payload FROM implementation_plan_artifacts WHERE spec_id = $1 ORDER BY run_id DESC LIMIT 1`,
+      [specId]
+    );
+    return (result.rows[0]?.payload as ImplementationPlanArtifact | undefined) ?? null;
   }
 
   async writeImplementationRun(run: ImplementationRun): Promise<void> {
@@ -817,6 +923,8 @@ function emptyState(): FileState {
     architectureRuns: [],
     architectureArtifacts: [],
     implementationTasks: [],
+    implementationPlanningRuns: [],
+    implementationPlanArtifacts: [],
     implementationRuns: [],
     implementationArtifacts: []
   };
